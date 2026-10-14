@@ -1,5 +1,7 @@
 # 身份码聚合 App — 总体规划文档
 
+> 多平台身份码聚合到一个 app 并可以快速切换，解决身份码打开繁琐的问题。
+>
 > 无后端、纯本地运行的 Android 应用。聚合拼多多 / 淘宝 / 京东 / 顺丰四平台的「身份码」与快递取件信息，一站式展示。
 
 ---
@@ -555,3 +557,5 @@ UI 状态统一为：`Loading / Content / Empty / Error(PlatformError)`，Empty 
 ---
 
 *文档版本：v1.3 ｜ 2026-09-27（**放弃 gomobile 内嵌 yyblib.aar，改用部署的 YYB-GO 远程服务**：真机 GetCode 稳定报 ShortLink `AppData decrypt/parse failed` 且新账号复现，无法修复；微信账号扫码/保活全部移至服务端 Web 页，App 侧 core:yyb 改为 HTTP 客户端，新增 §3.4 服务契约与「我的」页 YYB 服务卡片；淘宝短信验证码登录保持不变）｜ 上一版 v1.2：内嵌 YYB-GO 方案（见 `porting/移植设计文档.md`，已归档废弃）*
+
+
