@@ -1,0 +1,140 @@
+﻿Starting a Gradle Daemon, 2 incompatible and 11 stopped Daemons could not be reused, use --status for details
+
+> Configure project :app
+WARNING: The option setting 'android.overridePathCheck=true' is experimental.
+The current default is 'false'.
+WARNING: The specified Android SDK Build Tools version (34.0.0) is ignored, as it is below the minimum supported version (35.0.0) for Android Gradle Plugin 8.13.0.
+Android SDK Build Tools 35.0.0 will be used.
+To suppress this warning, remove "buildToolsVersion '34.0.0'" from your build.gradle file, as each version of the Android Gradle Plugin now has a default version of the build tools.
+
+> Task :platform:api:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:network:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:model:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :platform:sf:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :platform:jd:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:yyb:preBuild UP-TO-DATE
+> Task :platform:taobao:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :platform:pdd:preBuild UP-TO-DATE
+> Task :core:storage:preBuild UP-TO-DATE
+> Task :platform:ryll:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:preBuild UP-TO-DATE
+> Task :core:yyb:preDebugBuild UP-TO-DATE
+> Task :platform:pdd:preDebugBuild UP-TO-DATE
+> Task :core:storage:preDebugBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :platform:jd:processResources NO-SOURCE
+> Task :platform:ryll:processResources NO-SOURCE
+> Task :platform:sf:processResources NO-SOURCE
+> Task :platform:taobao:processResources NO-SOURCE
+> Task :platform:api:processResources NO-SOURCE
+> Task :platform:pdd:writeDebugAarMetadata UP-TO-DATE
+> Task :core:storage:writeDebugAarMetadata UP-TO-DATE
+> Task :core:yyb:writeDebugAarMetadata UP-TO-DATE
+> Task :app:generateDebugResValues UP-TO-DATE
+> Task :core:yyb:processDebugNavigationResources UP-TO-DATE
+> Task :platform:pdd:processDebugNavigationResources UP-TO-DATE
+> Task :core:storage:processDebugNavigationResources UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :core:yyb:generateDebugResValues UP-TO-DATE
+> Task :core:storage:generateDebugResValues UP-TO-DATE
+> Task :platform:pdd:generateDebugResValues UP-TO-DATE
+> Task :core:yyb:generateDebugResources UP-TO-DATE
+> Task :core:storage:generateDebugResources UP-TO-DATE
+> Task :platform:pdd:generateDebugResources UP-TO-DATE
+> Task :core:yyb:packageDebugResources UP-TO-DATE
+> Task :platform:pdd:packageDebugResources UP-TO-DATE
+> Task :core:storage:packageDebugResources UP-TO-DATE
+> Task :core:network:compileKotlin UP-TO-DATE
+> Task :core:model:compileKotlin UP-TO-DATE
+> Task :core:yyb:extractDeepLinksDebug UP-TO-DATE
+> Task :core:storage:extractDeepLinksDebug UP-TO-DATE
+> Task :platform:pdd:extractDeepLinksDebug UP-TO-DATE
+> Task :core:model:compileJava NO-SOURCE
+> Task :core:network:compileJava NO-SOURCE
+> Task :core:model:processResources NO-SOURCE
+> Task :core:network:processResources NO-SOURCE
+> Task :core:model:classes UP-TO-DATE
+> Task :core:network:classes UP-TO-DATE
+> Task :core:yyb:processDebugManifest UP-TO-DATE
+> Task :core:storage:processDebugManifest UP-TO-DATE
+> Task :platform:pdd:processDebugManifest UP-TO-DATE
+> Task :core:storage:compileDebugLibraryResources UP-TO-DATE
+> Task :platform:pdd:compileDebugLibraryResources UP-TO-DATE
+> Task :core:yyb:compileDebugLibraryResources UP-TO-DATE
+> Task :core:network:jar UP-TO-DATE
+> Task :core:model:jar UP-TO-DATE
+> Task :core:storage:parseDebugLocalResources UP-TO-DATE
+> Task :platform:pdd:parseDebugLocalResources UP-TO-DATE
+> Task :core:yyb:parseDebugLocalResources UP-TO-DATE
+> Task :core:yyb:generateDebugRFile UP-TO-DATE
+> Task :core:storage:generateDebugRFile UP-TO-DATE
+> Task :core:yyb:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :platform:pdd:generateDebugRFile UP-TO-DATE
+> Task :platform:pdd:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:storage:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:yyb:javaPreCompileDebug UP-TO-DATE
+> Task :core:storage:javaPreCompileDebug UP-TO-DATE
+> Task :platform:pdd:javaPreCompileDebug UP-TO-DATE
+> Task :platform:api:compileKotlin UP-TO-DATE
+> Task :platform:api:compileJava NO-SOURCE
+> Task :platform:api:classes UP-TO-DATE
+> Task :platform:api:jar UP-TO-DATE
+> Task :platform:jd:compileKotlin UP-TO-DATE
+> Task :core:yyb:compileDebugKotlin UP-TO-DATE
+> Task :platform:jd:compileJava NO-SOURCE
+> Task :platform:jd:classes UP-TO-DATE
+> Task :core:yyb:compileDebugJavaWithJavac NO-SOURCE
+> Task :core:yyb:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :core:storage:compileDebugKotlin UP-TO-DATE
+> Task :platform:jd:jar UP-TO-DATE
+> Task :platform:taobao:compileKotlin UP-TO-DATE
+> Task :platform:ryll:compileKotlin UP-TO-DATE
+> Task :platform:sf:compileKotlin UP-TO-DATE
+> Task :platform:ryll:compileJava NO-SOURCE
+> Task :platform:taobao:compileJava NO-SOURCE
+> Task :core:storage:compileDebugJavaWithJavac NO-SOURCE
+> Task :platform:ryll:classes UP-TO-DATE
+> Task :platform:sf:compileJava NO-SOURCE
+> Task :platform:taobao:classes UP-TO-DATE
+> Task :platform:sf:classes UP-TO-DATE
+> Task :core:storage:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :platform:sf:jar UP-TO-DATE
+> Task :platform:ryll:jar UP-TO-DATE
+> Task :platform:taobao:jar UP-TO-DATE
+> Task :platform:pdd:compileDebugKotlin UP-TO-DATE
+> Task :platform:pdd:compileDebugJavaWithJavac NO-SOURCE
+> Task :platform:pdd:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:processDebugNavigationResources UP-TO-DATE
+> Task :app:compileDebugNavigationResources UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :app:processDebugMainManifest
+> Task :app:processDebugManifest
+> Task :app:processDebugManifestForPackage
+> Task :app:processDebugResources
+> Task :app:kspDebugKotlin UP-TO-DATE
+
+> Task :app:compileDebugKotlin
+w: file:///D:/身份码聚合app/app/app/src/main/kotlin/com/aggapp/app/ui/ExpressScreen.kt:51:49 'fun <reified VM : ViewModel> hiltViewModel(viewModelStoreOwner: ViewModelStoreOwner = ..., key: String? = ...): VM' is deprecated. Moved to package: androidx.hilt.lifecycle.viewmodel.compose.
+w: file:///D:/身份码聚合app/app/app/src/main/kotlin/com/aggapp/app/ui/MainActivity.kt:80:49 'fun <reified VM : ViewModel> hiltViewModel(viewModelStoreOwner: ViewModelStoreOwner = ..., key: String? = ...): VM' is deprecated. Moved to package: androidx.hilt.lifecycle.viewmodel.compose.
+w: file:///D:/身份码聚合app/app/app/src/main/kotlin/com/aggapp/app/ui/MineScreen.kt:55:36 'fun <reified VM : ViewModel> hiltViewModel(viewModelStoreOwner: ViewModelStoreOwner = ..., key: String? = ...): VM' is deprecated. Moved to package: androidx.hilt.lifecycle.viewmodel.compose.
+w: file:///D:/身份码聚合app/app/app/src/main/kotlin/com/aggapp/app/ui/MineScreen.kt:508:50 'val LocalClipboardManager: ProvidableCompositionLocal<ClipboardManager>' is deprecated. Use LocalClipboard instead which supports suspend functions.
+w: file:///D:/身份码聚合app/app/app/src/main/kotlin/com/aggapp/app/ui/PddQrLoginDialog.kt:152:37 'static fun insertImage(p0: ContentResolver!, p1: Bitmap!, p2: String!, p3: String!): String!' is deprecated. Deprecated in Java.
+
+[Incubating] Problems report is available at: file:///D:/%E8%BA%AB%E4%BB%BD%E7%A0%81%E8%81%9A%E5%90%88app/app/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/9.1.0/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 1m
+70 actionable tasks: 6 executed, 64 up-to-date
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.1.0/userguide/configuration_cache_enabling.html

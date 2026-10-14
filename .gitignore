@@ -1,0 +1,34 @@
+# ===== 凭据 / 敏感信息 =====
+yyb_cookies.txt
+*.cookies
+*.keystore
+local.properties
+
+# ===== 逆向原始物料（体积大且有版权风险，只保留 docs/ 内自写笔记）=====
+sf/
+ryll/
+jd/
+pdd/
+taobao/
+porting/
+h5/
+YYB-Go-Enhanced-main/
+
+# ===== 构建产物 =====
+app/**/build/
+app/**/bin/
+app/.kotlin/
+app/.gradle/
+.gradle/
+*.apk
+*.aab
+
+# ===== IDE / 工具 =====
+.trae/
+.idea/
+*.iml
+.vscode/
+
+# ===== 系统文件 =====
+Thumbs.db
+.DS_Store

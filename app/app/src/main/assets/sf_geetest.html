@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>安全验证</title>
+<style>
+  html,body{margin:0;padding:0;background:#fff;}
+  .wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:80vh;font-family:sans-serif;}
+  .tip{color:#666;font-size:14px;margin:12px 0;}
+  #cap{width:100%;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="tip" id="tip">正在加载验证，请稍候…</div>
+  <div id="cap"></div>
+</div>
+<script>
+function L(m){ console.log(m); }
+window.onerror = function (msg, src, line) { L('JSERR: ' + msg + ' @' + src + ':' + line); };
+
+// 心跳：若日志里 hb 停在 0，说明 WebView JS 定时器被挂起（环境问题，与极验无关）
+var hbN = 0;
+setInterval(function(){ hbN++; L('hb ' + hbN); }, 2000);
+</script>
+<script src="https://static.geetest.com/v4/gt4.js"
+        onload="L('gt4js loaded')"
+        onerror="L('GT4JS LOAD FAILED')"></script>
+<script>
+// MIMP H5 极验 v4 captchaId（sf.md §2.5：MIMP 独立登录链路，sendValidCode 强制极验；
+// 与顺丰小程序的 fadae7813ed2b90d59031c524f809095 不同且四件套绑定 captcha_id 不可混用）
+var CAPTCHA_ID = 'd6ee898c223af2b2374447d5af25d51b';
+
+function report(result) {
+  window.AndroidCaptcha && window.AndroidCaptcha.onCaptcha(JSON.stringify({
+    lot_number: result.lot_number,
+    captcha_output: result.captcha_output,
+    pass_token: result.pass_token,
+    gen_time: result.gen_time
+  }));
+}
+
+// 直连 JSONP 探测已移除：极验对未知 callback 会返回 "jsonp xss" 错误，干扰 gt4 正常流程
+
+var attempt = 0, ready = false, captchaObj = null;
+
+function tryInit() {
+  attempt++;
+  L('initGeetest4 attempt #' + attempt);
+  initGeetest4({ captchaId: CAPTCHA_ID, product: 'bind' }, function (cap) {
+    captchaObj = cap;
+    cap.onReady(function () {
+      ready = true;
+      L('onReady -> showCaptcha');
+      cap.showCaptcha();
+    });
+    cap.onSuccess(function () { L('onSuccess'); report(cap.getValidate()); });
+    cap.onClose(function () { L('onClose'); });
+    cap.onFail(function (e) { L('onFail: ' + JSON.stringify(e || {})); });
+    cap.onError(function (e) {
+      L('geetest onError: ' + String(e && e.msg || e));
+      window.AndroidCaptcha && window.AndroidCaptcha.onCaptcha(JSON.stringify({error: String(e && e.msg || e)}));
+    });
+  });
+}
+
+function retryLoop() {
+  if (ready || attempt >= 4) {
+    if (!ready) { document.getElementById('tip').textContent = '验证加载失败，请关闭后重试'; L('give up'); }
+    return;
+  }
+  setTimeout(function () {
+    if (!ready) {
+      try { captchaObj && captchaObj.destroy(); } catch (e) {}
+      tryInit(); retryLoop();
+    }
+  }, 5000);
+}
+
+tryInit();
+retryLoop();
+</script>
+</body>
+</html>
