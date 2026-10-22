@@ -43,9 +43,9 @@ import java.util.concurrent.TimeUnit
  */
 object AppUpdate {
 
-    /** 更新源：jsDelivr 优先（国内直连），GitHub raw 兜底；@update 指向 main 分支 */
+    /** 更新源：jsDelivr 优先（国内直连），GitHub raw 兜底；@main 指向 main 分支 */
     private val JSON_URLS = listOf(
-        "https://cdn.jsdelivr.net/gh/njpemo/mashangqu@update/latest.json",
+        "https://cdn.jsdelivr.net/gh/njpemo/mashangqu@main/update/latest.json",
         "https://raw.githubusercontent.com/njpemo/mashangqu/main/update/latest.json",
     )
 
