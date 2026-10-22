@@ -14,15 +14,20 @@ android {
         applicationId = "com.aggapp.app"
         minSdk = 26
         targetSdk = 34
-        // 每次构建自动递增（epoch 分钟），确保 adb install -r 同名包也能命中更新
-        versionCode = (System.currentTimeMillis() / 60000L).toInt()
-        versionName = "0.1." + (System.currentTimeMillis() / 60000L % 100000)
-        // 蒲公英 API Key 不入库：在 app/local.properties 中配置 pgyerApiKey=xxx
-        val pgyerKey = rootProject.file("local.properties").takeIf { it.exists() }
-            ?.readLines()?.firstOrNull { it.startsWith("pgyerApiKey=") }
-            ?.substringAfter('=')?.trim() ?: ""
-        buildConfigField("String", "PGYER_API_KEY", "\"$pgyerKey\"")
-        buildConfigField("String", "PGYER_APP_KEY", "\"65c8b01fe3d923b6fcd36683d20ac4c9\"")
+        // 版本单一来源：update/latest.json（发版时先改它）；缺省回退 epoch 分钟
+        val updateJson = rootProject.file("../update/latest.json")
+        if (updateJson.exists()) {
+            val text = updateJson.readText()
+            versionCode = Regex("\"versionCode\"\\s*:\\s*(\\d+)").find(text)
+                ?.groupValues?.get(1)?.toInt()
+                ?: (System.currentTimeMillis() / 60000L).toInt()
+            versionName = Regex("\"versionName\"\\s*:\\s*\"([^\"]+)\"").find(text)
+                ?.groupValues?.get(1)
+                ?: ("0.1." + (System.currentTimeMillis() / 60000L % 100000))
+        } else {
+            versionCode = (System.currentTimeMillis() / 60000L).toInt()
+            versionName = "0.1." + (System.currentTimeMillis() / 60000L % 100000)
+        }
     }
     buildToolsVersion = "34.0.0"
 

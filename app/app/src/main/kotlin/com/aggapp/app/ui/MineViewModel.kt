@@ -100,6 +100,7 @@ class MineViewModel @Inject constructor(
                     val alive = try {
                         adapters.getValue(p).checkAlive(cred)
                     } catch (e: Exception) {
+                        AppLog.e("AggApp", "$p checkAlive failed", e)
                         false
                     }
                     PlatformLoginState(
@@ -435,6 +436,7 @@ class MineViewModel @Inject constructor(
             try {
                 val cred = adapters.getValue(Platform.TAOBAO).loginWithSmsCode(smsPhone, smsCode)
                 session.upsert(cred)
+                AppLog.d("AggApp", "taobao login ok: tokenLen=${cred.token.length} cookies=${cred.token.split(';').size} unb=${cred.extra["unb"]}")
                 _state.value = _state.value.copy(busy = false, message = "淘宝登录成功")
                 refreshLoginStates()
             } catch (e: Exception) {

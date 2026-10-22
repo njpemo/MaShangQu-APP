@@ -23,76 +23,69 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.FileProvider
-import com.aggapp.app.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
- * 蒲公英应用内更新（API 2.0：POST /apiv2/app/check + 应用内下载 APK + 拉起安装）。
- * 文档：https://www.pgyer.com/doc/view/api_version
+ * 应用内更新（JSON 更新源方案，零密钥）：
+ * 版本信息发布在仓库 update/latest.json，App 经 jsDelivr CDN（国内可直连）读取，
+ * 失败降级 GitHub raw。全程不携带任何 API Key，APK 内无密钥可提取。
  *
- * 接入步骤：
- * 1. 登录蒲公英后台 https://www.pgyer.com/account/api 获取 API Key，填入 [API_KEY]
- * 2. 在蒲公英「我的应用」里找到本应用的 appKey，填入 [APP_KEY]
- * 3. 每次发新版后，App 启动即会提示更新；点「立即更新」在应用内下载并自动拉起安装
+ * 发版流程（Key 只在开发机 local.properties，仅蒲公英上传用）：
+ * 1. 修改 update/latest.json 的 versionCode/versionName/apkUrl/changelog
+ * 2. gradlew assembleRelease（versionCode/versionName 自动取自 latest.json）
+ * 3. APK 上传蒲公英 → 把蒲公英下载短链填入 apkUrl（或用 GitHub Release 直链）→ 提交推送
  */
-object PgyerUpdate {
+object AppUpdate {
 
-    // API Key 经 BuildConfig 注入（app/local.properties 配置 pgyerApiKey=xxx），不硬编码入库
-    private val API_KEY = BuildConfig.PGYER_API_KEY
-    private const val APP_KEY = BuildConfig.PGYER_APP_KEY
-
-    private const val CHECK_URL = "https://www.pgyer.com/apiv2/app/check"
+    /** 更新源：jsDelivr 优先（国内直连），GitHub raw 兜底；@update 指向 main 分支 */
+    private val JSON_URLS = listOf(
+        "https://cdn.jsdelivr.net/gh/njpemo/mashangqu@update/latest.json",
+        "https://raw.githubusercontent.com/njpemo/mashangqu/main/update/latest.json",
+    )
 
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
     /** 检测结果：有新版本时非空 */
     data class UpdateInfo(
-        val versionName: String,      // 新版本号，如 1.1
-        val versionNo: String,        // 上传包的版本编号
-        val updateDescription: String,// 更新说明
-        val downloadURL: String,      // 安装地址（含 _api_key，勿写入日志/公开分享）
+        val versionCode: Int,
+        val versionName: String,
+        val apkUrl: String,
+        val changelog: String,
     )
 
     /**
-     * 调用蒲公英 check 接口。当前版本号由调用方传入（versionName）。
-     * 网络失败 / 无新版本 / 未配置 key 均返回 null，静默跳过。
+     * 拉取更新源并与本地 versionCode 比对。
+     * 网络失败 / 无新版本均返回 null，静默跳过。
      */
-    suspend fun check(currentVersionName: String): UpdateInfo? = withContext(Dispatchers.IO) {
-        if (API_KEY.startsWith("YOUR_") || APP_KEY.startsWith("YOUR_")) return@withContext null
-        runCatching {
-            val body = FormBody.Builder()
-                .add("_api_key", API_KEY)
-                .add("appKey", APP_KEY)
-                .add("buildVersion", currentVersionName)
-                .build()
-            val resp = client.newCall(Request.Builder().url(CHECK_URL).post(body).build()).execute()
-            resp.use {
-                if (!it.isSuccessful) return@withContext null
-                val root = JSONObject(it.body?.string() ?: "")
-                if (root.optInt("code", -1) != 0) return@withContext null
-                val data = root.optJSONObject("data") ?: return@withContext null
-                if (!data.optBoolean("buildHaveNewVersion")) return@withContext null
-                val url = data.optString("downloadURL").orEmpty()
-                if (url.isBlank()) return@withContext null
-                UpdateInfo(
-                    versionName = data.optString("buildVersion"),
-                    versionNo = data.optString("buildVersionNo"),
-                    updateDescription = data.optString("buildUpdateDescription"),
-                    downloadURL = url,
-                )
-            }
-        }.getOrNull()
+    suspend fun check(currentVersionCode: Int): UpdateInfo? = withContext(Dispatchers.IO) {
+        for (url in JSON_URLS) {
+            runCatching {
+                client.newCall(Request.Builder().url(url).build()).execute().use { resp ->
+                    if (!resp.isSuccessful) return@use null
+                    val root = runCatching { org.json.JSONObject(resp.body?.string() ?: "") }
+                        .getOrNull() ?: return@use null
+                    val remoteCode = root.optInt("versionCode", 0)
+                    val apkUrl = root.optString("apkUrl").orEmpty()
+                    if (remoteCode <= currentVersionCode || apkUrl.isBlank()) return@use null
+                    UpdateInfo(
+                        versionCode = remoteCode,
+                        versionName = root.optString("versionName"),
+                        apkUrl = apkUrl,
+                        changelog = root.optString("changelog").orEmpty(),
+                    )
+                }
+            }.getOrNull()?.let { return@withContext it }
+        }
+        null
     }
 
     /**
@@ -161,20 +154,23 @@ object PgyerUpdate {
  * 用法：在 setContent 的主题内调用一次。
  */
 @Composable
-fun PgyerUpdateEffect() {
+fun AppUpdateEffect() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var info by remember { mutableStateOf<PgyerUpdate.UpdateInfo?>(null) }
+    var info by remember { mutableStateOf<AppUpdate.UpdateInfo?>(null) }
     var progress by remember { mutableStateOf<Float?>(null) }   // null=未在下载；非空=下载中
     var downloadError by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        val current = try {
-            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        val currentCode = try {
+            context.packageManager.getPackageInfo(context.packageName, 0).let {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) it.longVersionCode.toInt()
+                else @Suppress("DEPRECATION") it.versionCode
+            }
         } catch (_: Exception) {
-            null
+            0
         }
-        info = current?.let { PgyerUpdate.check(it) }
+        info = AppUpdate.check(currentCode)
     }
 
     info?.let { u ->
@@ -191,8 +187,8 @@ fun PgyerUpdateEffect() {
                         )
                     } else if (downloadError) {
                         Text("下载失败，请检查网络后重试。")
-                    } else if (u.updateDescription.isNotBlank()) {
-                        Text(u.updateDescription)
+                    } else if (u.changelog.isNotBlank()) {
+                        Text(u.changelog)
                     }
                 }
             },
@@ -201,19 +197,19 @@ fun PgyerUpdateEffect() {
                     TextButton(onClick = {
                         downloadError = false
                         // 未授予「安装未知应用」权限时先引导去设置，回来后再点即可下载安装
-                        if (!PgyerUpdate.canInstall(context)) {
-                            PgyerUpdate.requestInstallPermission(context)
+                        if (!AppUpdate.canInstall(context)) {
+                            AppUpdate.requestInstallPermission(context)
                             return@TextButton
                         }
                         progress = 0f
                         scope.launch {
-                            val apk = PgyerUpdate.downloadApk(context, u.downloadURL) { p ->
+                            val apk = AppUpdate.downloadApk(context, u.apkUrl) { p ->
                                 progress = p
                             }
                             progress = null
                             if (apk != null) {
                                 info = null
-                                PgyerUpdate.installApk(context, apk)
+                                AppUpdate.installApk(context, apk)
                             } else {
                                 downloadError = true
                             }

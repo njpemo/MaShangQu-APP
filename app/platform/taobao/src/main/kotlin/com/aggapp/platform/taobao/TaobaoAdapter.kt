@@ -8,6 +8,7 @@ import com.aggapp.core.model.IdentityCode
 import com.aggapp.core.model.Platform
 import com.aggapp.core.model.PickupCode
 import com.aggapp.core.model.PlatformError
+import com.aggapp.platform.api.AppLog
 import com.aggapp.platform.api.CapturedRequest
 import com.aggapp.platform.api.LoginMode
 import com.aggapp.platform.api.PlatformAdapter
@@ -48,7 +49,22 @@ class TaobaoAdapter @Inject constructor() : PlatformAdapter {
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .writeTimeout(15, TimeUnit.SECONDS)
+        .addInterceptor(::httpLogInterceptor)
         .build()
+
+    /** 全链路 HTTP 日志（tag TB，落 AppLog 环 + aggapp.log）：真机排查登录/身份码问题不需要 adb logcat */
+    private fun httpLogInterceptor(chain: okhttp3.Interceptor.Chain): okhttp3.Response {
+        val req = chain.request()
+        val resp = chain.proceed(req)
+        val body = try {
+            resp.peekBody(2048L).string()
+        } catch (_: Exception) {
+            ""
+        }
+        val cookieCount = req.header("Cookie")?.count { it == ';' }?.plus(1) ?: 0
+        AppLog.d("TB", "http ${req.method} ${req.url.host}${req.url.encodedPath} -> ${resp.code} ck=$cookieCount body=${body.take(600)}")
+        return resp
+    }
 
     private val mtop = TaobaoMtopClient(http)
 

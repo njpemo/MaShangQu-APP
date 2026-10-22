@@ -16,7 +16,7 @@
 - **快递列表聚合**：各平台站点快递统一展示，按平台/站点筛选，跨平台按运单号去重合并、互补查码；本地缓存支持离线查看
 - **取件码详情**：单件快递取件码大字/大图展示，方便驿站出示
 - **登录态管理**：启动自动检查各平台登录态有效性，失效标红并支持一键重登
-- **应用内更新**：接入蒲公英，启动自动检查新版本，应用内下载 APK 并拉起安装
+- **应用内更新**：启动自动检查新版本，应用内下载 APK 并拉起安装（版本源为仓库 `update/latest.json`，经 jsDelivr CDN 读取，客户端零密钥）
 - **运行日志**：「我的」页实时日志面板，一键复制排查
 
 ## 登录方式
@@ -46,6 +46,15 @@ cd app
 ```
 
 产物位于 `app/app/build/outputs/apk/`。
+
+## 发版流程
+
+版本单一来源：`update/latest.json`。
+
+1. 修改 `update/latest.json` 的 `versionCode` / `versionName` / `changelog`；
+2. `.\gradlew.bat assembleRelease`（versionCode/versionName 自动取自 latest.json）；
+3. APK 上传蒲公英（API Key 只存于本机 `app/local.properties`，仅发版上传用）或发 GitHub Release；
+4. 把下载直链填回 `latest.json` 的 `apkUrl`，提交推送 → 已装用户启动即收到更新提示。
 
 ## 项目结构
 

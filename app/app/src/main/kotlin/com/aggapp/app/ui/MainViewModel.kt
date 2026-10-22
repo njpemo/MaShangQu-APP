@@ -8,6 +8,7 @@ import com.aggapp.core.model.Credential
 import com.aggapp.core.model.IdentityCode
 import com.aggapp.core.model.Platform
 import com.aggapp.core.model.PlatformError
+import com.aggapp.platform.api.AppLog
 import com.aggapp.platform.api.PlatformAdapter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
@@ -96,8 +97,9 @@ class MainViewModel @Inject constructor(
                     real[p] = isReal
                 } catch (e: PlatformError.NeedRelogin) {
                     real[p] = isReal // 凭据失效：不展示码
+                    if (isReal) AppLog.w("MainVM", "$p fetchIdentityCode 需重登（登录态失效）")
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    if (isReal) AppLog.e("MainVM", "$p fetchIdentityCode failed", e)
                 }
             }
             _state.value = _state.value.copy(
@@ -133,7 +135,7 @@ class MainViewModel @Inject constructor(
                     isReal = _state.value.isReal + (platform to isReal),
                 )
             } catch (e: Exception) {
-                e.printStackTrace()
+                if (isReal) AppLog.e("MainVM", "$platform fetchIdentityCode failed", e)
             }
         }
     }
