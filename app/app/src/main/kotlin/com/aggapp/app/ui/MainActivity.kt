@@ -23,6 +23,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.aggapp.app.ui.theme.AggTheme
+import com.aggapp.app.update.PgyerUpdateEffect
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
@@ -31,6 +32,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             AggTheme {
+                PgyerUpdateEffect()
                 val navController = rememberNavController()
                 AggScaffold(navController)
             }
