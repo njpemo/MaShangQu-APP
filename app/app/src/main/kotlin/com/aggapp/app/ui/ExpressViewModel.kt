@@ -62,11 +62,22 @@ class ExpressViewModel @Inject constructor(
     val ui: StateFlow<ExpressUiState> = _ui.asStateFlow()
 
     init {
-        refresh()
+        refresh(force = true)
     }
 
-    /** 拉取各平台包裹列表 + 跟踪单状态合并（顺丰+淘宝+拼多多+如意邻里，各自独立容错） */
-    fun refresh() {
+    /** 上次刷新时间，进入页面时的自动刷新用 30s 节流 */
+    private var lastRefreshAt = 0L
+
+    /**
+     * 拉取各平台包裹列表 + 跟踪单状态合并（顺丰+淘宝+拼多多+如意邻里，各自独立容错）
+     * @param force 用户主动刷新（重试/下拉）用 true：强制执行并显示 loading；
+     *              进入页面自动刷新用默认 false：30s 内节流跳过，已有数据时静默刷新不闪 loading
+     */
+    fun refresh(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && now - lastRefreshAt < 30_000) return
+        lastRefreshAt = now
+        val silent = !force && _ui.value.stations.isNotEmpty()
         val creds = sessionRepo.credentials.value
         val loggedIn = creds.keys.filter {
             it == Platform.SF || it == Platform.TAOBAO || it == Platform.PDD || it == Platform.RYLL
@@ -75,7 +86,7 @@ class ExpressViewModel @Inject constructor(
             _ui.value = ExpressUiState(error = "请先在「我的」页登录顺丰/淘宝（短信验证码）/拼多多/如意邻里")
             return
         }
-        _ui.value = _ui.value.copy(loading = true, error = null, loggedInPlatforms = loggedIn)
+        _ui.value = _ui.value.copy(loading = !silent, error = null, loggedInPlatforms = loggedIn)
         viewModelScope.launch {
             val errors = mutableListOf<String>()
             val allItems = mutableListOf<ExpressItem>()
@@ -185,8 +196,15 @@ class ExpressViewModel @Inject constructor(
             }
             _ui.value = _ui.value.copy(
                 loading = false,
-                stations = groups.map { (name, list) -> StationGroup(name, list.toList()) },
-                error = if (groups.isEmpty() && errors.isNotEmpty()) errors.joinToString("\n") else null,
+                // 静默刷新全部失败时保留旧列表，不打扰用户（下次进入或手动刷新再试）
+                stations = if (silent && groups.isEmpty() && errors.isNotEmpty()) {
+                    _ui.value.stations
+                } else {
+                    groups.map { (name, list) -> StationGroup(name, list.toList()) }
+                },
+                error = if (silent) {
+                    null // 静默刷新不弹错误（旧数据仍在展示）
+                } else if (groups.isEmpty() && errors.isNotEmpty()) errors.joinToString("\n") else null,
             )
         }
     }

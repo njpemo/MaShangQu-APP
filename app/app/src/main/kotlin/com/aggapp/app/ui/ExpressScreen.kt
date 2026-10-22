@@ -23,6 +23,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -52,6 +53,9 @@ fun ExpressScreen(viewModel: ExpressViewModel = hiltViewModel()) {
     val ui by viewModel.ui.collectAsState()
     var waybillInput by remember { mutableStateOf("") }
     var suffixInput by remember { mutableStateOf("") }
+
+    // 每次进入本页自动刷新（VM 内 30s 节流 + 静默合并，不闪 loading）
+    LaunchedEffect(Unit) { viewModel.refresh() }
 
     Scaffold(topBar = { TopAppBar(title = { Text("快递") }) }) { pad ->
         Column(
