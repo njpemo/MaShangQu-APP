@@ -221,7 +221,7 @@ fun IdCodeScreen(vm: MainViewModel) {
         }
     }
 
-    // ===== 全屏全部平台码（按钮进入；单击任意处退出；纵向排列各平台码）=====
+    // ===== 全屏全部平台码（按钮进入；单击任意处退出；五码均分屏高，免滚动全部可见）=====
     if (showAllCodes) {
         Dialog(
             onDismissRequest = { showAllCodes = false },
@@ -231,45 +231,53 @@ fun IdCodeScreen(vm: MainViewModel) {
                 Modifier
                     .fillMaxSize()
                     .background(Color.Black)
-                    .verticalScroll(rememberScrollState())
                     .pointerInput(Unit) { detectTapGestures(onTap = { showAllCodes = false }) }
-                    .padding(vertical = 32.dp),
+                    .padding(vertical = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 if (state.loading) {
-                    CircularProgressIndicator(Modifier.padding(24.dp))
+                    CircularProgressIndicator(Modifier.padding(12.dp))
                 }
+                // 每个平台均分剩余高度（weight），条码 ContentScale.Fit 自适应缩放，
+                // 不再用 verticalScroll——任何屏幕都无需上下滑动即可看到全部五码
                 platforms.forEach { p ->
                     val code = state.codes[p]
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(p.label, fontSize = 18.sp, color = Color.White)
-                        Spacer(Modifier.height(8.dp))
+                    Column(
+                        Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(p.label, fontSize = 15.sp, color = Color.White)
                         if (code != null) {
                             renderCode128(code.content)?.let {
                                 Image(
                                     bitmap = it.asImageBitmap(),
                                     contentDescription = "${p.label}身份码条形码",
+                                    contentScale = ContentScale.Fit,
                                     modifier = Modifier
+                                        .weight(1f)
                                         .fillMaxWidth()
                                         .padding(horizontal = 24.dp),
                                 )
                             }
-                            Spacer(Modifier.height(6.dp))
                             Text(
                                 code.content,
-                                fontSize = 14.sp,
+                                fontSize = 13.sp,
                                 letterSpacing = 2.sp,
                                 color = Color.White,
+                                maxLines = 1,
                             )
                         } else {
-                            Text(
-                                "暂无身份码（未登录或拉取失败）",
-                                fontSize = 13.sp,
-                                color = Color.Gray,
-                            )
+                            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                Text(
+                                    "暂无身份码（未登录或拉取失败）",
+                                    fontSize = 13.sp,
+                                    color = Color.Gray,
+                                )
+                            }
                         }
                     }
-                    Spacer(Modifier.height(28.dp))
                 }
                 Text("单击屏幕退出", fontSize = 13.sp, color = Color.Gray)
             }
