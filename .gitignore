@@ -6,23 +6,14 @@ local.properties
 
 # ===== 逆向原始物料（体积大且有版权风险，只保留 docs/ 内自写笔记）=====
 # 注意：仅忽略仓库根目录下的逆向物料，勿误伤 app/platform/ 下的源码模块
-/sf/
-/ryll/
-/jd/
-/pdd/
-/taobao/
-/porting/
-/h5/
-/YYB-Go-Enhanced-main/
+/逆向/
+/yyb-go/
 /ryll_*.json
 /ryll_*.txt
 /vcode.json
-/skm.png
-/qq.png
-/wx.png
-/image-*.png
+/ryll_vcode.png
+/宣传/
 /ts/
-/宣传-*/
 /campus-pickup-code-hub/
 
 # ===== 构建产物 =====
