@@ -67,9 +67,12 @@ class MainViewModel @Inject constructor(
     private val _state = MutableStateFlow(IdCodeUiState())
     val state: StateFlow<IdCodeUiState> = _state.asStateFlow()
 
+    /** 上次全量刷新时间，用于 ON_RESUME 节流 */
+    private var lastRefreshAt = 0L
+
     init {
         session.restore()
-        refreshAll()
+        refreshAll(force = true)
         // 每秒 tick 更新倒计时；到期自动重取该平台身份码
         viewModelScope.launch {
             while (true) {
@@ -85,29 +88,48 @@ class MainViewModel @Inject constructor(
         return if (cred != null) cred to true else mockCreds.getValue(p) to false
     }
 
-    fun refreshAll() {
+    /**
+     * 全量刷新所有平台身份码。
+     * @param force 下拉刷新/首次加载用 true：强制执行并显示 loading
+     *              ON_RESUME 自动刷新用 false：30 秒内节流跳过；已有缓存时静默刷新
+     *              （不置 loading、按平台合并结果），避免切页转场期的重组风暴造成卡顿
+     */
+    fun refreshAll(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && now - lastRefreshAt < 30_000) return
+        lastRefreshAt = now
+        val silent = !force && _state.value.codes.isNotEmpty()
         viewModelScope.launch {
-            _state.value = _state.value.copy(loading = true)
+            if (!silent) _state.value = _state.value.copy(loading = true)
             val fetched = mutableMapOf<Platform, IdentityCode>()
             val real = mutableMapOf<Platform, Boolean>()
+            val relogin = mutableListOf<Platform>()
             for ((p, adapter) in adapters) {
                 val (cred, isReal) = credentialFor(p)
                 try {
                     fetched[p] = adapter.fetchIdentityCode(cred)
                     real[p] = isReal
                 } catch (e: PlatformError.NeedRelogin) {
-                    real[p] = isReal // 凭据失效：不展示码
+                    relogin += p // 凭据失效：不展示码
+                    real[p] = isReal
                     if (isReal) AppLog.w("MainVM", "$p fetchIdentityCode 需重登（登录态失效）")
                 } catch (e: Exception) {
                     if (isReal) AppLog.e("MainVM", "$p fetchIdentityCode failed", e)
                 }
             }
-            _state.value = _state.value.copy(
-                codes = fetched,
-                isReal = real,
-                loading = false,
-                selected = _state.value.selected,
-            )
+            _state.value = if (silent) {
+                _state.value.copy(
+                    codes = (_state.value.codes + fetched) - relogin.toSet(),
+                    isReal = _state.value.isReal + real,
+                )
+            } else {
+                _state.value.copy(
+                    codes = fetched,
+                    isReal = real,
+                    loading = false,
+                    selected = _state.value.selected,
+                )
+            }
         }
     }
 

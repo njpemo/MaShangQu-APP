@@ -3,6 +3,9 @@ package com.aggapp.app.ui
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
@@ -78,6 +81,11 @@ fun AggScaffold(navController: NavHostController) {
             navController = navController,
             startDestination = "idcode",
             modifier = Modifier.padding(pad),
+            // 快速淡入淡出，替换默认约 700ms 的转场（默认转场期间叠加重组会明显卡顿）
+            enterTransition = { fadeIn(tween(180)) },
+            exitTransition = { fadeOut(tween(120)) },
+            popEnterTransition = { fadeIn(tween(180)) },
+            popExitTransition = { fadeOut(tween(120)) },
         ) {
             composable("idcode") { IdCodeScreen(hiltViewModel<MainViewModel>()) }
             composable("express") { ExpressScreen() }

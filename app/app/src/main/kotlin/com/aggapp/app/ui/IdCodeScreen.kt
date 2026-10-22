@@ -12,6 +12,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -85,7 +90,7 @@ fun IdCodeScreen(vm: MainViewModel) {
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) vm.refreshAll()
+            if (event == Lifecycle.Event.ON_RESUME) vm.refreshAll() // VM 内 30s 节流 + 静默刷新
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
@@ -107,7 +112,7 @@ fun IdCodeScreen(vm: MainViewModel) {
         // 下滑刷新（Material3 PullToRefreshBox；内容不足一屏也能触发）
         PullToRefreshBox(
             isRefreshing = state.loading,
-            onRefresh = { vm.refreshAll() },
+            onRefresh = { vm.refreshAll(force = true) },
         ) {
             Column(
                 Modifier
@@ -126,13 +131,20 @@ fun IdCodeScreen(vm: MainViewModel) {
                 }
             }
 
-            val code = state.codes[state.selected]
+            // 平台切换淡入淡出（200ms），替代原来的硬切
+            AnimatedContent(
+                targetState = state.selected,
+                transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(120)) },
+                label = "platformCode",
+            ) { selected ->
+            Column {
+            val code = state.codes[selected]
             if (code == null) {
                 Box(Modifier.fillMaxWidth().height(240.dp), contentAlignment = Alignment.Center) {
                     Text("暂无身份码，单击条码区域刷新")
                 }
             } else {
-                if (state.isReal[state.selected] == false) {
+                if (state.isReal[selected] == false) {
                     Text(
                         "⚠ 当前为 Mock 演示数据，登录后显示真实身份码",
                         Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -149,7 +161,7 @@ fun IdCodeScreen(vm: MainViewModel) {
                             // 单击刷新；双击全屏（2026-09-29 交互重构：取代不好用的下滑刷新）
                             .pointerInput(code.content) {
                                 detectTapGestures(
-                                    onTap = { vm.refreshAll() },
+                                    onTap = { vm.refreshAll(force = true) },
                                     onDoubleTap = { fullscreen = true },
                                 )
                             },
@@ -190,6 +202,8 @@ fun IdCodeScreen(vm: MainViewModel) {
                         }
                     }
                 }
+            }
+            }
             }
 
             // 全部平台码（2026-10-08：取代聚合码，点击后全屏展示各平台身份码）
