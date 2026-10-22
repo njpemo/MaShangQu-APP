@@ -8,10 +8,6 @@ import com.aggapp.app.di.SessionRepository
 import com.aggapp.core.model.Credential
 import com.aggapp.core.model.Platform
 import com.aggapp.core.model.PlatformLoginState
-import com.aggapp.core.yyb.YybNotConfigured
-import com.aggapp.core.yyb.YybRemote
-import com.aggapp.core.yyb.YybRescanRequired
-import com.aggapp.core.yyb.YybSettings
 import com.aggapp.platform.api.AppLog
 import com.aggapp.platform.api.CapturedRequest
 import com.aggapp.platform.api.PlatformAdapter
@@ -29,11 +25,6 @@ data class MineUiState(
     val message: String? = null,          // 操作结果提示（Toast/内联）
     val smsSent: Boolean = false,         // 淘宝验证码已发送
     val busy: Boolean = false,
-    // ---- YYB 远程服务（v1.3：HTTP 调用部署的 YYB-GO，扫码在服务端 Web 页 /scan 完成）----
-    val yybBaseUrl: String = "",          // 配置态回显
-    val yybRef: String = "",              // 账号 ref（openid 或数字 id）
-    val yybAvailable: Boolean = false,    // 是否已配置（baseUrl+ref 齐全）
-    val yybTestStatus: String? = null,    // 连通测试结果
     // ---- 京东短信验证码登录（prepare → 滑块 WebView 截 vt → sendSms → verify）----
     val jdCaptchaUrl: String? = null,     // 非空时弹出滑块验证 WebView
     val jdSmsSent: Boolean = false,       // 短信验证码已发送（可输入验证码登录）
@@ -46,9 +37,17 @@ data class MineUiState(
     val pddQrHint: String? = null,        // 弹窗内提示文案（轮询中/已过期重刷/验证类型等）
     val pddSmsVerifySent: Boolean = false,// 二次验证为短信码且已下发（可输码）
     val pddVerifyUrl: String? = null,     // 非 Text 类型：官方验证页 URL（WebView 手动过）
+    val pddQuiz: com.aggapp.platform.pdd.PddQrClient.QuizQuestion? = null, // type=101 知识验证题（原生弹窗作答）
+    val pddQuizOrder: Int = 1,            // challenge_verify 的 question_order_number，提交后 +1
+    val pddQuizMsg: String? = null,       // 答题反馈（答错提示等）
     // ---- 如意邻里短信验证码登录（图形码 + 短信码，README §3.2）----
     val ryllVcodeBase64: String? = null,  // 图形验证码 PNG（base64 data URL，Compose 直接解码显示）
     val ryllSmsSent: Boolean = false,     // 短信验证码已发送（可输入验证码登录）
+    // ---- 淘宝多账号选择（手机号绑定多个淘宝账号时，原生弹窗选择后收尾登录）----
+    val tbAccounts: List<com.aggapp.platform.taobao.TbAccountOption> = emptyList(),
+    // ---- 淘宝 iv 风控页（多账号收尾命中风控时，WebView 弹窗内手动过风控）----
+    val tbRiskUrl: String? = null,
+    val tbWebviewCookies: List<Pair<String, String>> = emptyList(), // (url, setCookie串) 预置注入
 )
 
 /**
@@ -57,15 +56,14 @@ data class MineUiState(
  * - 京东：手机号+短信验证码协议直连登录（prepare→滑块 WebView 截 vt→sendSms→verify）；兜底粘贴 pt_key/pin
  * - 顺丰：短信验证码登录官方小程序链路（发码前过极验 v4 滑块拿 gt 四件套；登录态 suuid → 静态段永久本地出码，sf.md §2.5）；兜底粘贴 YJY-Auth
  * - 拼多多：扫码登录（AUTH_LOGIN 二维码存相册→拼多多 App 相册识别；54002 二次验证 Text 原生输码/其余 WebView 官方页；不踢 App 下线）
- * - YYB：服务配置卡片（BASE URL + 账号 ref + 连通测试）；微信账号扫码在服务端 /scan 页完成
  * 启动时 restore 凭据并逐平台 checkAlive。
  */
 @HiltViewModel
 class MineViewModel @Inject constructor(
     registry: PlatformRegistry,
     private val session: SessionRepository,
-    private val yybSettings: YybSettings,
     private val pddQrClient: com.aggapp.platform.pdd.PddQrClient,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: Context,
 ) : ViewModel() {
 
     private val adapters: Map<Platform, PlatformAdapter> = registry.adapters
@@ -82,11 +80,6 @@ class MineViewModel @Inject constructor(
     init {
         session.restore()
         refreshLoginStates()
-        _state.value = _state.value.copy(
-            yybBaseUrl = yybSettings.baseUrl,
-            yybRef = yybSettings.ref,
-            yybAvailable = yybSettings.configured,
-        )
     }
 
     fun refreshLoginStates() {
@@ -100,7 +93,6 @@ class MineViewModel @Inject constructor(
                     val alive = try {
                         adapters.getValue(p).checkAlive(cred)
                     } catch (e: Exception) {
-                        AppLog.e("AggApp", "$p checkAlive failed", e)
                         false
                     }
                     PlatformLoginState(
@@ -130,72 +122,6 @@ class MineViewModel @Inject constructor(
             session.upsert(cred)
             _state.value = _state.value.copy(message = "${cred.platform.label}登录成功（WebView）")
             refreshLoginStates()
-        }
-    }
-
-    // ---------- YYB 远程服务：配置 + 三平台登录 ----------
-
-    /**
-     * 调对应平台 adapter.remoteLogin()（YYB 未配置返回 null）：
-     * 成功 → 保存凭据 + 刷新登录态总览 + 提示；失败 → 提示异常 message
-     */
-    fun loginRemote(platform: Platform) {
-        viewModelScope.launch {
-            _state.value = _state.value.copy(busy = true, message = null)
-            try {
-                val cred = adapters.getValue(platform).remoteLogin()
-                if (cred == null) {
-                    _state.value = _state.value.copy(busy = false, message = "YYB 服务未配置，请先在下方填写服务地址与账号 ref")
-                    return@launch
-                }
-                session.upsert(cred)
-                _state.value = _state.value.copy(busy = false, message = "${platform.label}登录成功")
-                refreshLoginStates()
-            } catch (e: YybRescanRequired) {
-                AppLog.e("AggApp", "loginRemote $platform 需重扫", e)
-                _state.value = _state.value.copy(busy = false, message = "${platform.label}登录失败：${e.message}（在 YYB 服务 Web 页 /scan 重新扫码）")
-            } catch (e: Exception) {
-                AppLog.e("AggApp", "loginRemote $platform failed", e)
-                _state.value = _state.value.copy(busy = false, message = "${platform.label}登录失败：${e.message}")
-            }
-        }
-    }
-
-    // ---------- YYB：服务配置 ----------
-
-    /** 保存 YYB 服务配置（BASE URL + 账号 ref），保存即视为已配置 */
-    fun saveYybConfig(baseUrl: String, ref: String) {
-        val url = baseUrl.trim()
-        val r = ref.trim()
-        if (url.isBlank() || r.isBlank()) {
-            _state.value = _state.value.copy(message = "服务地址与账号 ref 均必填")
-            return
-        }
-        yybSettings.baseUrl = url
-        yybSettings.ref = r
-        _state.value = _state.value.copy(
-            yybBaseUrl = url,
-            yybRef = r,
-            yybAvailable = true,
-            yybTestStatus = null,
-            message = "YYB 服务配置已保存",
-        )
-    }
-
-    /** 连通测试：GET /health 探活 */
-    fun testYybConnection() {
-        val url = _state.value.yybBaseUrl
-        if (url.isBlank()) {
-            _state.value = _state.value.copy(yybTestStatus = "请先填写服务地址")
-            return
-        }
-        viewModelScope.launch {
-            _state.value = _state.value.copy(busy = true, yybTestStatus = "正在测试连通…")
-            val ok = YybRemote.health(url)
-            _state.value = _state.value.copy(
-                busy = false,
-                yybTestStatus = if (ok) "✓ 连接成功" else "✗ 连接失败（检查地址/网络，或服务未启动）",
-            )
         }
     }
 
@@ -305,9 +231,25 @@ class MineViewModel @Inject constructor(
                 pddQrHint = "安全验证：验证码已发送到绑定手机号，请输入短信验证码",
             )
         } else {
-            // App 端 preCheck/obtain 已占用本 vat 的验证会话；页面再对同一 vat preCheck 会拿到
-            // 降级挑战（实测症状：点选无提示词、通过后无反应、收尾 110000）。
-            // 因此非 Text 一律重新换取一份全新 vat，让官方页用干净会话跑完整流程。
+            // type=101 知识验证（选择题）：challengeCaptcha 拉题 → 原生弹窗作答 →
+            // challengeVerify 提交（0=通过 3002=答错取下一题）→ authTicket(vat,1) 收尾。
+            // 2026-10-21 CDP 抓包实测协议，全程 API 无 WebView。
+            val quiz = try {
+                pddQrClient.challengeCaptcha(vat, pddSalt)
+            } catch (e: Exception) {
+                AppLog.e("AggApp", "pdd challengeCaptcha failed", e)
+                null
+            }
+            if (quiz != null) {
+                _state.value = _state.value.copy(
+                    pddQrHint = "安全验证：请在弹窗中选择正确答案",
+                    pddQuiz = quiz,
+                    pddQuizOrder = 1,
+                    pddQuizMsg = null,
+                )
+                return
+            }
+            // 知识题拉取失败 → 兜底：换全新 vat 走 WebView 官方验证页
             pddVat = try {
                 when (val again = pddQrClient.authTicket(pddTicket, pddSecretKey)) {
                     is com.aggapp.platform.pdd.PddQrClient.AuthResult.NeedVerify -> again.verifyAuthToken
@@ -326,6 +268,58 @@ class MineViewModel @Inject constructor(
                 pddVerifyUrl = pddVerifyPageUrl(),
                 pddQrHint = null,
             )
+        }
+    }
+
+    /** type=101 原生答题：提交所选选项 → 0=通过收尾 / 3002=答错自动取下一题 */
+    fun pddAnswerQuiz(optionKeys: List<String>) {
+        val q = _state.value.pddQuiz ?: return
+        viewModelScope.launch {
+            _state.value = _state.value.copy(busy = true, pddQuizMsg = null)
+            try {
+                val code = pddQrClient.challengeVerify(
+                    vat = pddVat,
+                    salt = pddSalt,
+                    questionId = q.questionId,
+                    optionKeys = optionKeys,
+                    questionOrderNumber = _state.value.pddQuizOrder,
+                )
+                when (code) {
+                    0 -> {
+                        // 全部答对，收尾换登录态
+                        when (val auth = pddQrClient.authTicket(pddTicket, pddSecretKey, pddVat, 1)) {
+                            is com.aggapp.platform.pdd.PddQrClient.AuthResult.Ok -> onPddQrSuccess(auth.credential)
+                            is com.aggapp.platform.pdd.PddQrClient.AuthResult.NeedVerify ->
+                                _state.value = _state.value.copy(
+                                    busy = false,
+                                    pddQuiz = null,
+                                    message = "验证通过但服务端仍要求验证，请重新扫码",
+                                )
+                        }
+                    }
+                    3002 -> {
+                        // 答错：服务端自动下发下一题
+                        val next = pddQrClient.challengeCaptcha(pddVat, pddSalt)
+                        _state.value = if (next != null) {
+                            _state.value.copy(
+                                busy = false,
+                                pddQuiz = next,
+                                pddQuizOrder = _state.value.pddQuizOrder + 1,
+                                pddQuizMsg = "答案不正确，请再试一次",
+                            )
+                        } else {
+                            _state.value.copy(busy = false, pddQuiz = null, message = "验证异常，请关闭后重新扫码")
+                        }
+                    }
+                    else -> _state.value = _state.value.copy(
+                        busy = false,
+                        pddQuizMsg = "提交失败（code=$code），请重试",
+                    )
+                }
+            } catch (e: Exception) {
+                AppLog.e("AggApp", "pdd answer quiz failed", e)
+                _state.value = _state.value.copy(busy = false, pddQuizMsg = "提交失败：${e.message}")
+            }
         }
     }
 
@@ -411,8 +405,9 @@ class MineViewModel @Inject constructor(
     private suspend fun onPddQrSuccess(cred: Credential) {
         session.upsert(cred)
         _state.value = _state.value.copy(
+            busy = false, // 成功路径必须复位，否则全局按钮一直灰
             pddQrOpen = false, pddQrContent = null, pddQrHint = null,
-            pddSmsVerifySent = false, message = "拼多多登录成功",
+            pddSmsVerifySent = false, pddQuiz = null, message = "拼多多登录成功",
         )
         refreshLoginStates()
     }
@@ -422,7 +417,8 @@ class MineViewModel @Inject constructor(
         pddQrJob?.cancel()
         pddQrJob = null
         _state.value = _state.value.copy(
-            pddQrOpen = false, pddQrContent = null, pddQrHint = null, pddSmsVerifySent = false,
+            busy = false,
+            pddQrOpen = false, pddQrContent = null, pddQrHint = null, pddSmsVerifySent = false, pddQuiz = null,
         )
     }
 
@@ -434,16 +430,104 @@ class MineViewModel @Inject constructor(
         viewModelScope.launch {
             _state.value = _state.value.copy(busy = true, message = null)
             try {
-                val cred = adapters.getValue(Platform.TAOBAO).loginWithSmsCode(smsPhone, smsCode)
-                session.upsert(cred)
-                AppLog.d("AggApp", "taobao login ok: tokenLen=${cred.token.length} cookies=${cred.token.split(';').size} unb=${cred.extra["unb"]}")
-                _state.value = _state.value.copy(busy = false, message = "淘宝登录成功")
-                refreshLoginStates()
+                val adapter = adapters.getValue(Platform.TAOBAO) as com.aggapp.platform.taobao.TaobaoAdapter
+                when (val r = adapter.smsLogin(smsPhone, smsCode)) {
+                    is com.aggapp.platform.taobao.TaobaoAdapter.SmsLoginResult.Done -> {
+                        session.upsert(r.cred)
+                        _state.value = _state.value.copy(busy = false, message = "淘宝登录成功")
+                        refreshLoginStates()
+                    }
+                    is com.aggapp.platform.taobao.TaobaoAdapter.SmsLoginResult.NeedSelect -> {
+                        // 手机号绑定多个淘宝账号：弹原生选择弹窗，选中后 tbSelectAccount 收尾
+                        _state.value = _state.value.copy(busy = false, tbAccounts = r.accounts)
+                    }
+                    is com.aggapp.platform.taobao.TaobaoAdapter.SmsLoginResult.RiskCheck ->
+                        enterTbRiskCheck(r.url)
+                }
             } catch (e: Exception) {
                 AppLog.e("AggApp", "taobao login failed", e)
                 _state.value = _state.value.copy(busy = false, message = "登录失败：${e.message}")
             }
         }
+    }
+
+    /** 用户在弹窗中选中账号：continue.htm 收尾落登录态；命中 iv 风控页 → 弹 WebView 手动过 */
+    private var lastTbUniqId: String = ""
+
+    fun tbSelectAccount(uniqId: String) {
+        lastTbUniqId = uniqId
+        attemptSelectAccount()
+    }
+
+    private fun attemptSelectAccount() {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(busy = true, message = null)
+            try {
+                val adapter = adapters.getValue(Platform.TAOBAO) as com.aggapp.platform.taobao.TaobaoAdapter
+                when (val r = adapter.selectAccount(lastTbUniqId)) {
+                    is com.aggapp.platform.taobao.TaobaoAdapter.SelectResult.Done -> {
+                        session.upsert(r.cred)
+                        _state.value = _state.value.copy(
+                            busy = false, tbAccounts = emptyList(), tbRiskUrl = null,
+                            tbWebviewCookies = emptyList(), message = "淘宝登录成功",
+                        )
+                        refreshLoginStates()
+                    }
+                    is com.aggapp.platform.taobao.TaobaoAdapter.SelectResult.RiskCheck ->
+                        enterTbRiskCheck(r.url)
+                }
+            } catch (e: Exception) {
+                AppLog.e("AggApp", "taobao selectAccount failed", e)
+                _state.value = _state.value.copy(
+                    busy = false, tbAccounts = emptyList(), tbRiskUrl = null,
+                    message = "账号登录失败：${e.message}（可重新发送验证码）",
+                )
+            }
+        }
+    }
+
+    /** 进入淘宝 iv 风控/身份验证流程：WebView 弹窗打开验证页，预置会话 Cookie；
+     *  用户放行后（WebView 出现 cookie2/unb）tbRiskCheckPassed 合并 Cookie 收尾 */
+    private fun enterTbRiskCheck(url: String) {
+        val adapter = adapters.getValue(Platform.TAOBAO) as com.aggapp.platform.taobao.TaobaoAdapter
+        val header = adapter.loginCookieHeader
+        val cookies = header.split("; ").filter { it.contains("=") }
+            .map { "https://www.taobao.com/" to "$it; Domain=.taobao.com; Path=/" }
+        _state.value = _state.value.copy(busy = false, tbAccounts = emptyList(), tbRiskUrl = url, tbWebviewCookies = cookies)
+    }
+
+    /** 风控 WebView 检测到放行（出现 cookie2/unb 登录态 Cookie）→ 合并 Cookie 直接收尾
+     *  （登录已在 WebView 内完成，contextToken 已消费，不能重试 selectAccount） */
+    fun tbRiskCheckPassed(webviewCookieHeader: String) {
+        if (_state.value.tbRiskUrl == null) return
+        viewModelScope.launch {
+            _state.value = _state.value.copy(busy = true, message = null)
+            try {
+                val adapter = adapters.getValue(Platform.TAOBAO) as com.aggapp.platform.taobao.TaobaoAdapter
+                val cred = adapter.completeRiskCheck(webviewCookieHeader)
+                session.upsert(cred)
+                _state.value = _state.value.copy(
+                    busy = false, tbRiskUrl = null, tbWebviewCookies = emptyList(), message = "淘宝登录成功",
+                )
+                refreshLoginStates()
+            } catch (e: Exception) {
+                AppLog.e("AggApp", "taobao risk check complete failed", e)
+                _state.value = _state.value.copy(
+                    busy = false, tbRiskUrl = null, tbWebviewCookies = emptyList(),
+                    message = "淘宝登录失败：${e.message}（可重新发送验证码）",
+                )
+            }
+        }
+    }
+
+    /** 关闭风控 WebView 弹窗（放弃本次登录） */
+    fun tbDismissRiskCheck() {
+        _state.value = _state.value.copy(tbRiskUrl = null, tbWebviewCookies = emptyList(), message = "已取消，可重新发送验证码")
+    }
+
+    /** 关闭多账号选择弹窗（取消登录） */
+    fun tbDismissAccountSelect() {
+        _state.value = _state.value.copy(tbAccounts = emptyList(), message = "已取消，可重新发送验证码")
     }
 
     // ---------- 京东：短信验证码登录（主链路，jd.md §2.2.2）----------
@@ -724,6 +808,94 @@ class MineViewModel @Inject constructor(
     fun logout(platform: Platform) {
         session.clear(platform)
         refreshLoginStates()
+    }
+
+    // ---------- 调试日志导出（debug 包「我的」页入口） ----------
+
+    /**
+     * 导出调试日志 txt 并弹出系统分享：
+     * ① 全部登录态（含完整 token/Cookie 登录态，仅供 debug 排查）
+     * ② 淘宝短信登录链路中间态（csrf/smsToken/会话 Cookie）
+     * ③ AppLog 内存环（操作日志 + NetDebug 请求日志）
+     * ④ aggapp.log 落盘文件全量（App 重启不丢）
+     */
+    fun exportDebugLog() {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(busy = true, message = null)
+            try {
+                val dir = java.io.File(appContext.cacheDir, "debug_export").apply { mkdirs() }
+                val ts = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US)
+                    .format(java.util.Date())
+                val f = java.io.File(dir, "aggapp-debug-$ts.txt")
+                f.writeText(buildDebugReport())
+                val uri = androidx.core.content.FileProvider.getUriForFile(
+                    appContext, "${appContext.packageName}.fileprovider", f,
+                )
+                val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                appContext.startActivity(
+                    android.content.Intent.createChooser(send, "导出调试日志")
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+                _state.value = _state.value.copy(busy = false, message = "调试日志已导出")
+            } catch (e: Exception) {
+                AppLog.e("AggApp", "export debug log failed", e)
+                _state.value = _state.value.copy(busy = false, message = "导出失败：${e.message}")
+            }
+        }
+    }
+
+    private suspend fun buildDebugReport(): String = buildString {
+        appendLine("===== 码上取 调试日志导出 =====")
+        appendLine("time: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date())}")
+        appendLine("package: ${appContext.packageName}")
+        try {
+            val pi = appContext.packageManager.getPackageInfo(appContext.packageName, 0)
+            appendLine("versionName: ${pi.versionName}  versionCode: ${pi.longVersionCode}")
+            appendLine("debuggable: ${(appContext.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0}")
+        } catch (_: Exception) {}
+        appendLine("NetDebug.enabled=${com.aggapp.platform.api.NetDebug.enabled}")
+
+        appendLine()
+        appendLine("===== 1. 各平台登录态（含完整 token/Cookie） =====")
+        val creds = session.credentials.value
+        for (p in Platform.entries) {
+            val cred = creds[p]
+            appendLine("--- [${p.label}] ---")
+            if (cred == null) {
+                appendLine("未登录（无凭据）")
+                continue
+            }
+            appendLine("capturedAt: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date(cred.capturedAt))}")
+            appendLine("token: ${cred.token}")
+            if (cred.extra.isNotEmpty()) {
+                appendLine("extra:")
+                cred.extra.forEach { (k, v) -> appendLine("  $k = $v") }
+            }
+        }
+
+        appendLine()
+        appendLine("===== 2. 淘宝登录链路中间态（短信协议登录会话） =====")
+        (adapters[Platform.TAOBAO] as? com.aggapp.platform.taobao.TaobaoAdapter)
+            ?.let { appendLine(it.debugSessionDump()) }
+
+        appendLine()
+        appendLine("===== 3. AppLog 内存环（操作日志 + 请求日志） =====")
+        appendLine(AppLog.dump())
+
+        appendLine()
+        appendLine("===== 4. aggapp.log 落盘（全量，超 2MB 截尾保留最新） =====")
+        val logFile = java.io.File(appContext.filesDir, "aggapp.log")
+        if (logFile.exists()) {
+            val bytes = logFile.readBytes()
+            val text = String(bytes, Charsets.UTF_8)
+            appendLine(if (text.length > 2_000_000) text.takeLast(2_000_000) else text)
+        } else {
+            appendLine("（aggapp.log 不存在）")
+        }
     }
 
     fun consumeMessage() {

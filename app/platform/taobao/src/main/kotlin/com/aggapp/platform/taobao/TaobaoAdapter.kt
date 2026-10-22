@@ -8,7 +8,6 @@ import com.aggapp.core.model.IdentityCode
 import com.aggapp.core.model.Platform
 import com.aggapp.core.model.PickupCode
 import com.aggapp.core.model.PlatformError
-import com.aggapp.platform.api.AppLog
 import com.aggapp.platform.api.CapturedRequest
 import com.aggapp.platform.api.LoginMode
 import com.aggapp.platform.api.PlatformAdapter
@@ -49,28 +48,108 @@ class TaobaoAdapter @Inject constructor() : PlatformAdapter {
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .writeTimeout(15, TimeUnit.SECONDS)
-        .addInterceptor(::httpLogInterceptor)
+        .addInterceptor(com.aggapp.platform.api.NetDebug.interceptor) // debug 包请求日志（淘宝登录链路重点）
         .build()
-
-    /** 全链路 HTTP 日志（tag TB，落 AppLog 环 + aggapp.log）：真机排查登录/身份码问题不需要 adb logcat */
-    private fun httpLogInterceptor(chain: okhttp3.Interceptor.Chain): okhttp3.Response {
-        val req = chain.request()
-        val resp = chain.proceed(req)
-        val body = try {
-            resp.peekBody(2048L).string()
-        } catch (_: Exception) {
-            ""
-        }
-        val cookieCount = req.header("Cookie")?.count { it == ';' }?.plus(1) ?: 0
-        AppLog.d("TB", "http ${req.method} ${req.url.host}${req.url.encodedPath} -> ${resp.code} ck=$cookieCount body=${body.take(600)}")
-        return resp
-    }
 
     private val mtop = TaobaoMtopClient(http)
 
     /** 短信登录会话（_csrf + smsToken + 会话 Cookie），sendSmsCode 建立后由 loginWithSmsCode 消费 */
     @Volatile
     private var loginSession: TaobaoLoginClient? = null
+
+    /** 调试导出：淘宝短信登录链路中间态（未发起时明确标注） */
+    fun debugSessionDump(): String {
+        val s = loginSession ?: return "loginSession=null（本次启动尚未发起淘宝短信登录）"
+        return s.debugDump()
+    }
+
+    /** 短信验证码登录结果：直接成功（Done）或多账号需选择（NeedSelect） */
+    sealed class SmsLoginResult {
+        data class Done(val cred: Credential) : SmsLoginResult()
+        data class NeedSelect(val accounts: List<TbAccountOption>) : SmsLoginResult()
+        data class RiskCheck(val url: String) : SmsLoginResult()
+    }
+
+    /** 短信验证码登录：多账号返回 NeedSelect；命中身份验证页返回 RiskCheck（会话保留，WebView 收尾） */
+    suspend fun smsLogin(phone: String, smsCode: String): SmsLoginResult {
+        val session = loginSession
+            ?: throw PlatformError.ParseFailed(Platform.TAOBAO, "请先调用 sendSmsCode 发送验证码")
+        pendingPhone = phone
+        return when (val out = session.login(phone, smsCode)) {
+            is SmsLoginOutcome.Done -> {
+                loginSession = null
+                SmsLoginResult.Done(buildSmsCredential(out.cookies, phone))
+            }
+            is SmsLoginOutcome.NeedSelectAccount ->
+                SmsLoginResult.NeedSelect(out.accounts)
+            // 会话保留：用户在 WebView 过完身份验证后 completeRiskCheck 合并收尾
+            is SmsLoginOutcome.RiskCheck ->
+                SmsLoginResult.RiskCheck(out.url)
+        }
+    }
+
+    /** 待选账号列表（UI 弹原生选择弹窗用；无多账号会话时空列表） */
+    val pendingAccounts: List<TbAccountOption>
+        get() = loginSession?.pendingAccounts.orEmpty()
+
+    /** 用户选中账号后收尾结果：登录态落地（Done）或需过 iv 风控页（RiskCheck，WebView 弹窗） */
+    sealed class SelectResult {
+        data class Done(val cred: Credential) : SelectResult()
+        data class RiskCheck(val url: String) : SelectResult()
+    }
+
+    /** 用户选中账号后收尾：continue.htm 落最终登录态 Cookie → Credential；命中风控页返回 RiskCheck */
+    suspend fun selectAccount(uniqId: String): SelectResult {
+        val session = loginSession
+            ?: throw PlatformError.ParseFailed(Platform.TAOBAO, "登录会话已失效，请重新发送验证码")
+        return when (val out = session.selectAccount(uniqId)) {
+            is SelectOutcome.Done -> {
+                loginSession = null
+                SelectResult.Done(buildSmsCredential(out.cookies, pendingPhone))
+            }
+            // 风控页：会话保留（returnUrl/uniqId 有效），用户过完风控后重试 selectAccount 即可落地
+            is SelectOutcome.RiskCheck -> SelectResult.RiskCheck(out.url)
+        }
+    }
+
+    /** 当前登录会话 Cookie 头（风控 WebView 预置注入用，保持服务端会话上下文） */
+    val loginCookieHeader: String
+        get() = loginSession?.cookieHeader().orEmpty()
+
+    /**
+     * 风控/身份验证 WebView 放行后收尾：用户已在 WebView 内完成登录（页面跳到淘宝首页），
+     * 把 WebView Cookie（含 cookie2/unb 等登录态，getCookie 可读 httpOnly）合并进会话存储
+     * 并组装 Credential。contextToken 已消费，不能重试 selectAccount。
+     */
+    fun completeRiskCheck(webviewCookieHeader: String): Credential {
+        val session = loginSession
+            ?: throw PlatformError.ParseFailed(Platform.TAOBAO, "登录会话已失效，请重新发送验证码")
+        val cookies = session.mergeWebviewCookies(webviewCookieHeader)
+        if (cookies["cookie2"].isNullOrBlank() || cookies["unb"].isNullOrBlank()) {
+            throw PlatformError.ParseFailed(
+                Platform.TAOBAO,
+                "风控放行后 Cookie 仍缺 cookie2/unb | cookies=${cookies.header()}",
+            )
+        }
+        loginSession = null
+        return buildSmsCredential(cookies, pendingPhone)
+    }
+
+    /** 登录成功的手机号（selectAccount 时补 extra.mobile 用） */
+    private var pendingPhone: String = ""
+
+    /** 凭据组装：全量 Cookie 存 token；extra 落 unb/_m_h5_tk/tracknick/mobile（§3.3 字段表） */
+    private fun buildSmsCredential(cookies: TaobaoCookieStore, phone: String): Credential = Credential(
+        platform = platform,
+        token = cookies.header(), // 全量 Cookie 原样保存，mtop 直调必须带齐（§9.3）
+        extra = mapOf(
+            "unb" to (cookies["unb"] ?: ""),
+            "_m_h5_tk" to (cookies["_m_h5_tk"] ?: ""), // 登录时可能尚未下发，mtop 两段式会自动补
+            "tracknick" to (cookies["tracknick"] ?: ""), // URL 编码昵称，展示用
+            "mobile" to phone,
+        ),
+        capturedAt = System.currentTimeMillis(),
+    )
 
     /** 发送短信验证码：§3.4 步骤 1+2（GET login.htm 取 _csrf → POST sendSms.do），会话态暂存单例内存 */
     override suspend fun sendSmsCode(phone: String) {
@@ -80,25 +159,19 @@ class TaobaoAdapter @Inject constructor() : PlatformAdapter {
         loginSession = client
     }
 
-    /** 短信验证码登录：§3.4 步骤 3（POST sms/login.do）。
-     *  全部 Set-Cookie（含 httpOnly）拼成 Cookie 串存 Credential.token；
-     *  extra 落 unb / _m_h5_tk / tracknick / mobile（§3.3 字段表）。 */
+    /** 接口方法兜底实现：多账号/风控时抛错引导走 UI 弹窗流程 */
     override suspend fun loginWithSmsCode(phone: String, smsCode: String): Credential {
-        val session = loginSession
-            ?: throw PlatformError.ParseFailed(Platform.TAOBAO, "请先调用 sendSmsCode 发送验证码")
-        val cookies = session.login(phone, smsCode)
-        loginSession = null
-        return Credential(
-            platform = platform,
-            token = cookies.header(), // 全量 Cookie 原样保存，mtop 直调必须带齐（§9.3）
-            extra = mapOf(
-                "unb" to (cookies["unb"] ?: ""),
-                "_m_h5_tk" to (cookies["_m_h5_tk"] ?: ""), // 登录时可能尚未下发，mtop 两段式会自动补
-                "tracknick" to (cookies["tracknick"] ?: ""), // URL 编码昵称，展示用
-                "mobile" to phone,
-            ),
-            capturedAt = System.currentTimeMillis(),
-        )
+        return when (val r = smsLogin(phone, smsCode)) {
+            is SmsLoginResult.Done -> r.cred
+            is SmsLoginResult.NeedSelect -> throw PlatformError.ParseFailed(
+                Platform.TAOBAO,
+                "该手机号绑定多个账号，请在弹窗中选择账号登录",
+            )
+            is SmsLoginResult.RiskCheck -> throw PlatformError.ParseFailed(
+                Platform.TAOBAO,
+                "淘宝要求身份验证，请在弹窗中完成安全验证",
+            )
+        }
     }
 
     /** WebView 登录兜底入口（loginMode 实际为 PHONE_CODE，协议登录优先） */

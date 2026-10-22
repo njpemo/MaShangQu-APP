@@ -17,11 +17,12 @@ import java.io.IOException
 internal const val TB_UA: String =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
 
-/** 统一 HTTP 结果（body 已按 UTF-8 解码；setCookies 为原始 Set-Cookie 头列表） */
+/** 统一 HTTP 结果（body 已按 UTF-8 解码；setCookies 为原始 Set-Cookie 头列表；location 供手动跳转） */
 internal class TaobaoHttpResponse(
     val code: Int,
     val body: String,
     val setCookies: List<String>,
+    val location: String? = null,
 )
 
 /** GET（带 UA/Referer/Cookie；网络失败抛 NetworkError；ua 缺省桌面 TB_UA） */
@@ -67,12 +68,38 @@ private suspend fun requestAndRead(http: OkHttpClient, request: Request): Taobao
     withContext(Dispatchers.IO) {
         try {
             http.newCall(request).execute().use { resp ->
-                TaobaoHttpResponse(resp.code, resp.body?.string().orEmpty(), resp.headers("Set-Cookie"))
+                TaobaoHttpResponse(
+                    resp.code,
+                    resp.body?.string().orEmpty(),
+                    resp.headers("Set-Cookie"),
+                    resp.header("Location"),
+                )
             }
         } catch (e: IOException) {
             throw PlatformError.NetworkError(Platform.TAOBAO, e)
         }
     }
+
+/** 不跟随重定向的 GET（登录收尾链路逐跳收 Set-Cookie 用；OkHttp 自动重定向会丢中间跳的 Set-Cookie） */
+internal suspend fun taobaoGetNoRedirect(
+    http: OkHttpClient,
+    url: String,
+    cookie: String,
+    referer: String,
+    ua: String = TB_UA,
+): TaobaoHttpResponse {
+    val noRedirect = http.newBuilder().followRedirects(false).build()
+    return requestAndRead(
+        noRedirect,
+        Request.Builder()
+            .url(url)
+            .header("User-Agent", ua)
+            .header("Referer", referer)
+            .apply { if (cookie.isNotEmpty()) header("Cookie", cookie) }
+            .get()
+            .build(),
+    )
+}
 
 /**
  * 扁平 Cookie 存储 —— 逐行移植自 taobao/js/protocol_login.js 的 JAR：

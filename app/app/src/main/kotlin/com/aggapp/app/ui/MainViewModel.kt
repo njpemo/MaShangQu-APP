@@ -8,7 +8,6 @@ import com.aggapp.core.model.Credential
 import com.aggapp.core.model.IdentityCode
 import com.aggapp.core.model.Platform
 import com.aggapp.core.model.PlatformError
-import com.aggapp.platform.api.AppLog
 import com.aggapp.platform.api.PlatformAdapter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
@@ -36,63 +35,16 @@ class MainViewModel @Inject constructor(
 
     private val adapters: Map<Platform, PlatformAdapter> = registry.adapters
 
-    /**
-     * Mock 凭据：无真实登录态时兜底演示（PDD 需微信 OAuth 暂无凭据入口；
-     * 其余平台一旦「我的」页登录成功即切换真实凭据）。
-     */
-    private val mockCreds: Map<Platform, Credential> = mapOf(
-        Platform.PDD to Credential(
-            Platform.PDD, "mock",
-            extra = mapOf("staticSeg" to "0000000000"),
-            capturedAt = 0,
-        ),
-        Platform.TAOBAO to Credential(
-            Platform.TAOBAO, "mock",
-            extra = mapOf("mobile" to "13800000000"), // mock 占位号
-            capturedAt = 0,
-        ),
-        Platform.JD to Credential(Platform.JD, "mock", capturedAt = 0),
-        Platform.SF to Credential(
-            Platform.SF, "mock",
-            extra = mapOf("staticSeg" to "2853414300"), // sf.md §4.3 实测样本
-            capturedAt = 0,
-        ),
-        Platform.RYLL to Credential(
-            Platform.RYLL, "mock",
-            extra = mapOf("pin" to "5Q394MCKDBENH9XX"), // ryll README §4.2 实测静态样本
-            capturedAt = 0,
-        ),
-    )
+    /** 有真实登录态返回凭据，否则 null（UI 提示未登录，不做 Mock 兜底） */
+    private fun credentialFor(p: Platform): Credential? = session.credentials.value[p]
 
-    private val _state = MutableStateFlow(IdCodeUiState())
-    val state: StateFlow<IdCodeUiState> = _state.asStateFlow()
-
-    /** 上次全量刷新时间，用于 ON_RESUME 节流 */
+    /** 上次全量刷新时间，ON_RESUME 自动刷新用 30s 节流 */
     private var lastRefreshAt = 0L
 
-    init {
-        session.restore()
-        refreshAll(force = true)
-        // 每秒 tick 更新倒计时；到期自动重取该平台身份码
-        viewModelScope.launch {
-            while (true) {
-                delay(1000)
-                tick()
-            }
-        }
-    }
-
-    /** 每个平台用真实凭据（有则用之），否则 Mock 兜底 */
-    private fun credentialFor(p: Platform): Pair<Credential, Boolean> {
-        val cred = session.credentials.value[p]
-        return if (cred != null) cred to true else mockCreds.getValue(p) to false
-    }
-
     /**
-     * 全量刷新所有平台身份码。
-     * @param force 下拉刷新/首次加载用 true：强制执行并显示 loading
-     *              ON_RESUME 自动刷新用 false：30 秒内节流跳过；已有缓存时静默刷新
-     *              （不置 loading、按平台合并结果），避免切页转场期的重组风暴造成卡顿
+     * 全量刷新。force=true（下拉/单击刷新）强制执行并显示 loading；
+     * 默认（ON_RESUME 自动刷新）30s 内节流跳过，已有缓存时静默刷新不闪 loading，
+     * 避免切页转场期的重组风暴造成卡顿。
      */
     fun refreshAll(force: Boolean = false) {
         val now = System.currentTimeMillis()
@@ -103,25 +55,24 @@ class MainViewModel @Inject constructor(
             if (!silent) _state.value = _state.value.copy(loading = true)
             val fetched = mutableMapOf<Platform, IdentityCode>()
             val real = mutableMapOf<Platform, Boolean>()
-            val relogin = mutableListOf<Platform>()
             for ((p, adapter) in adapters) {
-                val (cred, isReal) = credentialFor(p)
+                val cred = credentialFor(p)
+                if (cred == null) {
+                    real[p] = false // 未登录：不拉码
+                    continue
+                }
                 try {
                     fetched[p] = adapter.fetchIdentityCode(cred)
-                    real[p] = isReal
+                    real[p] = true
                 } catch (e: PlatformError.NeedRelogin) {
-                    relogin += p // 凭据失效：不展示码
-                    real[p] = isReal
-                    if (isReal) AppLog.w("MainVM", "$p fetchIdentityCode 需重登（登录态失效）")
+                    real[p] = false // 凭据失效：不展示码
                 } catch (e: Exception) {
-                    if (isReal) AppLog.e("MainVM", "$p fetchIdentityCode failed", e)
+                    e.printStackTrace()
                 }
             }
             _state.value = if (silent) {
-                _state.value.copy(
-                    codes = (_state.value.codes + fetched) - relogin.toSet(),
-                    isReal = _state.value.isReal + real,
-                )
+                // 静默刷新：按平台合并，拉取失败的平台保留旧码
+                _state.value.copy(codes = _state.value.codes + fetched, isReal = real)
             } else {
                 _state.value.copy(
                     codes = fetched,
@@ -129,6 +80,21 @@ class MainViewModel @Inject constructor(
                     loading = false,
                     selected = _state.value.selected,
                 )
+            }
+        }
+    }
+
+    private val _state = MutableStateFlow(IdCodeUiState())
+    val state: StateFlow<IdCodeUiState> = _state.asStateFlow()
+
+    init {
+        session.restore()
+        refreshAll(force = true)
+        // 每秒 tick 更新倒计时；到期自动重取该平台身份码
+        viewModelScope.launch {
+            while (true) {
+                delay(1000)
+                tick()
             }
         }
     }
@@ -149,15 +115,15 @@ class MainViewModel @Inject constructor(
 
     private fun refreshOne(platform: Platform) {
         viewModelScope.launch {
-            val (cred, isReal) = credentialFor(platform)
+            val cred = credentialFor(platform) ?: return@launch
             try {
                 val code = adapters.getValue(platform).fetchIdentityCode(cred)
                 _state.value = _state.value.copy(
                     codes = _state.value.codes + (platform to code),
-                    isReal = _state.value.isReal + (platform to isReal),
+                    isReal = _state.value.isReal + (platform to true),
                 )
             } catch (e: Exception) {
-                if (isReal) AppLog.e("MainVM", "$platform fetchIdentityCode failed", e)
+                e.printStackTrace()
             }
         }
     }

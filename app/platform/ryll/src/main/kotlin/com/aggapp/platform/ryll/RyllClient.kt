@@ -130,15 +130,55 @@ internal class RyllClient(private val http: OkHttpClient) {
 
     // ============ 快递列表（README §5） ============
 
+    // ============ 手机后四位验证（2026-10-22 全链实测） ============
+
+    /**
+     * POST /api/order/mobileCheck {lastFourMobile, waybillNo} → body 字面 true/false。
+     * 实测（YT7651323338983）：0000→false、7330→false、5220(正确)→true；
+     * 已签收单恒 true（不设防）；假单号 false；必须 JSON body（form 表单 → -57029）。
+     * 验证通过后服务端把验证态绑定在 jwt-token 会话上，随后的详情查询才会带出取件码。
+     */
+    suspend fun mobileCheck(token: String, lastFourMobile: String, waybillNo: String): Boolean =
+        withContext(Dispatchers.IO) {
+            val req = request(
+                "POST",
+                "$BASE/api/order/mobileCheck",
+                token,
+                body = """{"lastFourMobile":"$lastFourMobile","waybillNo":"$waybillNo"}""",
+            )
+            val resp = try {
+                http.newCall(req).execute()
+            } catch (e: IOException) {
+                throw PlatformError.NetworkError(PLATFORM, e)
+            }
+            resp.use { r ->
+                if (!r.isSuccessful) throw PlatformError.NetworkError(PLATFORM, IOException("HTTP ${r.code}"))
+                // 实测响应体就是裸布尔 true/false（无信封壳），宽容解析
+                val text = r.body?.string().orEmpty().trim()
+                text == "true" || runCatching {
+                    when (val el = json.parseToJsonElement(text)) {
+                        is JsonPrimitive -> el.booleanOrNull == true
+                        is JsonObject -> el.optStr("data") == "true"
+                        else -> false
+                    }
+                }.getOrDefault(false)
+            }
+        }
+
     /**
      * GET /api/order/orderDetailByWayBillNo?wayBillNo=<单号> → 查件详情+轨迹
      * （2026-09-29 实测 YT0711336342128 打通：baseOrderInfo.statusName=已到代收点，
      * 轨迹在 waybillInfoResultResponses[0].waybillProcessInfo[]，最新在前；
-     * 驿站名/站点电话在入柜条目 description 内；非本人单 userIdentity=visitor 无取件码）
+     * 驿站名/站点电话在入柜条目 description 内；非本人单 userIdentity=visitor 无取件码；
+     * 2026-10-22 实测：mobileCheck 尾号验证通过后（验证态绑定 token 会话），
+     * 同接口响应多出 recieveOrderDetailResponse.value.stationCode = 取件码（如 "439-1-495"），
+     * ocOrderDetailResponse.stationCode 同值，storageTakingCode = 驿站取件凭证号）
      */
-    suspend fun queryOrderDetail(waybillNo: String): RyllOrderDetail? = withContext(Dispatchers.IO) {
-        val url = "$BASE/api/order/orderDetailByWayBillNo?wayBillNo=${urlEnc(waybillNo)}"
-        val env = exec(request("GET", url, token = null)) // visitor 也可查，token 非必需但带上
+    suspend fun queryOrderDetail(waybillNo: String, token: String? = null): RyllOrderDetail? =
+        withContext(Dispatchers.IO) {
+            val url = "$BASE/api/order/orderDetailByWayBillNo?wayBillNo=${urlEnc(waybillNo)}"
+            // token 必须带：mobileCheck 验证态绑定在 token 会话上，无 token 永远出不了取件码段
+            val env = exec(request("GET", url, token))
         if (env.optStr("status") == "-57029") return@withContext null // 单号不存在实测返回该码
         val base = (env["baseOrderInfo"] as? JsonObject) ?: return@withContext null
         val tracks = mutableListOf<RyllTrack>()
@@ -169,7 +209,12 @@ internal class RyllClient(private val http: OkHttpClient) {
                 .joinToString(" ").ifBlank { null },
             toCity = listOfNotNull(base.optStr("recipientProvinceName"), base.optStr("recipientCityName"))
                 .joinToString(" ").ifBlank { null },
-            pickupCode = base.optStr("pickCode") ?: base.optStr("pickupCode"), // owner 单防御式提取
+            // owner 单防御式提取；visitor 单需 mobileCheck 通过后从 recieveOrderDetailResponse 出码（2026-10-22 实测）
+            pickupCode = base.optStr("pickCode")
+                ?: base.optStr("pickupCode")
+                ?: ((env["recieveOrderDetailResponse"] as? JsonObject)?.get("value") as? JsonObject)
+                    ?.optStr("stationCode")
+                ?: (env["ocOrderDetailResponse"] as? JsonObject)?.optStr("stationCode"),
             tracks = tracks,
         )
     }

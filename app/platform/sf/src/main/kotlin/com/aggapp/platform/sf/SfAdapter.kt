@@ -75,6 +75,7 @@ class SfAdapter @Inject constructor() : PlatformAdapter {
     private val http = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
+        .addInterceptor(com.aggapp.platform.api.NetDebug.interceptor)
         .build()
 
     /** MIMP H5 独立登录直连客户端（新主链路，sf.md §2.5/§4.4） */

@@ -12,7 +12,6 @@ import com.aggapp.platform.api.AppLog
 import com.aggapp.platform.api.CapturedRequest
 import com.aggapp.platform.api.LoginMode
 import com.aggapp.platform.api.PlatformAdapter
-import com.aggapp.platform.api.YybCodeSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -52,7 +51,6 @@ import javax.inject.Singleton
  */
 @Singleton
 class PddAdapter @Inject constructor(
-    private val yyb: YybCodeSource, // YYB 微信 code 源（:app 绑定，旧兜底链路）
     private val antiContent: PddAntiContent, // 隐藏 WebView 生成 anti-content（:app 提供）
 ) : PlatformAdapter {
 
@@ -67,18 +65,8 @@ class PddAdapter @Inject constructor(
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
             .followRedirects(false)
+            .addInterceptor(com.aggapp.platform.api.NetDebug.interceptor)
             .build()
-    }
-
-    /**
-     * YYB 微信扫码登录：YYB 不可用（未初始化/无微信账号库）→ null；
-     * 可用 → 取多多驿站小程序 code → [exchangeLoginCookie] 兑换 accesstoken。
-     */
-    override suspend fun remoteLogin(): Credential? {
-        if (!yyb.available) return null
-        // v1.3 远程 YYB：getCode 直接返回 code 字符串（无需再解析 JSON）
-        val code = yyb.getCode(APPID)
-        return exchangeLoginCookie(code)
     }
 
     /**

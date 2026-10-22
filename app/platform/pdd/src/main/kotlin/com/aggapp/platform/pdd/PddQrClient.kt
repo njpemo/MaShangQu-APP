@@ -53,6 +53,7 @@ class PddQrClient @Inject constructor(
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
             .followRedirects(false)
+            .addInterceptor(com.aggapp.platform.api.NetDebug.interceptor)
             .build()
     }
 
@@ -72,6 +73,16 @@ class PddQrClient @Inject constructor(
     }
 
     data class PreCk(val serverTime: Long?, val salt: String)
+
+    /** type=101 知识验证题（challenge_captcha 下发，原生弹窗作答） */
+    data class QuizQuestion(
+        val questionId: Int,
+        val desc: String,
+        val style: String,
+        val options: Map<String, String>, // key → 显示文本或图片 URL
+        val correctAnswerCnt: Int = 1,    // 需选中的答案数：1=单选，>1=多选
+        val questionOrder: Int = 0,       // 服务端 question_order（第几题）
+    )
 
     // ---------- 扫码 ----------
 
@@ -223,6 +234,70 @@ class PddQrClient @Inject constructor(
         val data = decryptResponse(outer, key, iv) ?: return false
         AppLog.d(TAG, "userVerify resp=${data.toString().take(200)}")
         return data.optInt("code", -1) == 0
+    }
+
+    // ---------- type=101 知识验证（2026-10-21 CDP 抓包实测协议） ----------
+
+    /**
+     * 拉取验证题（challenge_captcha）。请求同 obtainCaptcha 的加密信封；
+     * 响应为明文 JSON：{code, question_id, question_desc, question_style, correct_answer_cnt, options:{key:text}}。
+     * 答错后再次调用即取下一题。
+     */
+    suspend fun challengeCaptcha(vat: String, salt: String): QuizQuestion? {
+        val ac = anti()
+        val (key, iv) = sessionKey ?: fail("会话密钥缺失，须先 vcPreCk")
+        val params = JSONObject()
+            .put("anti_content", ac)
+            .put("verify_auth_token", vat)
+            .put("salt", salt)
+        val resp = post("api/phantom/challenge_captcha", encryptBody(params, vat, key, iv), ac)
+        val data = parseJson(resp)?.let { decryptResponse(it, key, iv) } ?: parseJson(resp)
+        if (data == null || data.optInt("code", -1) != 0) {
+            AppLog.w(TAG, "challengeCaptcha 失败 raw=${resp.body.take(200)}")
+            return null
+        }
+        val opts = data.optJSONObject("options") ?: return null
+        val map = buildMap {
+            for (k in opts.keys()) put(k, opts.optString(k))
+        }
+        val q = QuizQuestion(
+            questionId = data.optInt("question_id", -1),
+            desc = data.optString("question_desc"),
+            style = data.optString("question_style"),
+            options = map,
+            correctAnswerCnt = data.optInt("correct_answer_cnt", 1).coerceAtLeast(1),
+            questionOrder = data.optInt("question_order", 0),
+        )
+        AppLog.d(TAG, "challengeCaptcha 题目 id=${q.questionId} style=${q.style} opts=${map.values}")
+        return q
+    }
+
+    /**
+     * 提交答案（challenge_verify，明文 JSON）。
+     * 返回 code：0=全部通过（接着 authTicket 收尾）；3002=答错（取下一题）；其他=异常。
+     * questionOrderNumber 从 1 起，每次提交 +1。
+     */
+    suspend fun challengeVerify(
+        vat: String,
+        salt: String,
+        questionId: Int,
+        optionKeys: List<String>,
+        questionOrderNumber: Int,
+    ): Int {
+        val ac = anti()
+        val body = JSONObject()
+            .put("anti_content", ac)
+            .put("verify_auth_token", vat)
+            .put("useNativeAntiToken", true)
+            .put("salt", salt)
+            .put("question_id", questionId)
+            .put("user_options", org.json.JSONArray(optionKeys))
+            .put("question_order_number", questionOrderNumber)
+        val resp = post("api/phantom/challenge_verify", body, ac)
+        val data = parseJson(resp)
+        val code = data?.optInt("code", -1) ?: -1
+        AppLog.d(TAG, "challengeVerify qid=$questionId opts=$optionKeys order=$questionOrderNumber code=$code")
+        return code
     }
 
     // ---------- HTTP ----------

@@ -6,7 +6,9 @@
 
     <application
         android:name=".AggApp"
-        android:label="身份码聚合"
+        android:label="码上取"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@style/Theme.AggApp"
         android:allowBackup="false"
         android:usesCleartextTraffic="true">
@@ -19,6 +21,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".ui.CaptchaActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:screenOrientation="portrait" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

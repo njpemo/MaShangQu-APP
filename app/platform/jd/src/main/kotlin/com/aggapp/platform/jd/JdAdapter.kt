@@ -10,7 +10,6 @@ import com.aggapp.core.model.PickupCode
 import com.aggapp.platform.api.CapturedRequest
 import com.aggapp.platform.api.LoginMode
 import com.aggapp.platform.api.PlatformAdapter
-import com.aggapp.platform.api.YybCodeSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
@@ -41,7 +40,6 @@ import javax.inject.Singleton
  */
 @Singleton
 class JdAdapter @Inject constructor(
-    private val yyb: YybCodeSource, // YYB 微信 code 源（:app 绑定，内部调 core:yyb）
 ) : PlatformAdapter {
 
     override val platform = Platform.JD
@@ -53,6 +51,7 @@ class JdAdapter @Inject constructor(
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(10, TimeUnit.SECONDS)
             .writeTimeout(10, TimeUnit.SECONDS)
+            .addInterceptor(com.aggapp.platform.api.NetDebug.interceptor)
             .build()
     }
 
@@ -151,12 +150,6 @@ class JdAdapter @Inject constructor(
      * 按「目标 appid 正确即可兑换」假设先接通；失败时把网关 err_code / err_msg 带进
      * PlatformError message 便于真机联调定位（83=code 无效/已消费，264=参数异常，19=页面超时）。
      */
-    override suspend fun remoteLogin(): Credential? {
-        if (!yyb.available) return null
-        // v1.3 远程 YYB：getCode 直接返回 code 字符串
-        return loginWithCode(yyb.getCode(APPID_WX))
-    }
-
     /**
      * code-only v2/login 兑换（契约外公开方法，便于联调复用）。
      * sign = md5(["appid","wxappid","client_ver","ts","cmd","sub_cmd","gsalt"].map(值).join(""))（jd.md §2.2.2）。

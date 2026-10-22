@@ -3,9 +3,6 @@ package com.aggapp.app.ui
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
@@ -23,6 +20,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.aggapp.app.ui.theme.AggTheme
@@ -53,9 +53,10 @@ fun AggScaffold(navController: NavHostController) {
         TabItem("mine", "我的") { Icon(Icons.Filled.Person, null) },
     )
     val backStack by navController.currentBackStackEntryAsState()
-    val current = backStack?.destination?.route ?: "idcode"
+    val current = backStack?.destination?.route ?: "express"
 
     Scaffold(
+        containerColor = androidx.compose.material3.MaterialTheme.colorScheme.background,
         bottomBar = {
             NavigationBar {
                 tabs.forEach { tab ->
@@ -79,9 +80,9 @@ fun AggScaffold(navController: NavHostController) {
     ) { pad ->
         NavHost(
             navController = navController,
-            startDestination = "idcode",
+            startDestination = "express",
             modifier = Modifier.padding(pad),
-            // 快速淡入淡出，替换默认约 700ms 的转场（默认转场期间叠加重组会明显卡顿）
+            // 快速淡入淡出，替换默认约 700ms 的转场（默认转场叠加重组会明显卡顿）
             enterTransition = { fadeIn(tween(180)) },
             exitTransition = { fadeOut(tween(120)) },
             popEnterTransition = { fadeIn(tween(180)) },

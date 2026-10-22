@@ -30,5 +30,10 @@ class AggApp : Application() {
             }
         }
         AppLog.d("AggApp", "app start")
+        // debug 包开启全量请求日志（含 body/Set-Cookie 摘要）；release 包保持关闭
+        val isDebug = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        com.aggapp.platform.api.NetDebug.enabled = isDebug
+        com.aggapp.platform.api.NetDebug.withBody = isDebug
+        AppLog.d("AggApp", "NetDebug enabled=$isDebug")
     }
 }

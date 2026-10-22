@@ -65,13 +65,19 @@ class ExpressViewModel @Inject constructor(
         refresh(force = true)
     }
 
-    /** 上次刷新时间，进入页面时的自动刷新用 30s 节流 */
+    /** 上次刷新时间，进入页面自动刷新用 30s 节流 */
     private var lastRefreshAt = 0L
+
+    /** 清除查询结果展示（点空白处/刷新时调用；结果单号已加入跟踪列表，不受影响） */
+    fun clearSearchResult() {
+        _ui.value = _ui.value.copy(searchResult = null, searchDetail = null, searchNotice = null)
+    }
 
     /**
      * 拉取各平台包裹列表 + 跟踪单状态合并（顺丰+淘宝+拼多多+如意邻里，各自独立容错）
-     * @param force 用户主动刷新（重试/下拉）用 true：强制执行并显示 loading；
-     *              进入页面自动刷新用默认 false：30s 内节流跳过，已有数据时静默刷新不闪 loading
+     * @param force 用户主动刷新用 true：强制执行并显示 loading；
+     *              进入页面自动刷新用默认 false：30s 节流，已有数据时静默刷新（不闪 loading，
+     *              全部失败保留旧列表不弹错）
      */
     fun refresh(force: Boolean = false) {
         val now = System.currentTimeMillis()
@@ -86,7 +92,7 @@ class ExpressViewModel @Inject constructor(
             _ui.value = ExpressUiState(error = "请先在「我的」页登录顺丰/淘宝（短信验证码）/拼多多/如意邻里")
             return
         }
-        _ui.value = _ui.value.copy(loading = !silent, error = null, loggedInPlatforms = loggedIn)
+        _ui.value = _ui.value.copy(loading = !silent, error = null, loggedInPlatforms = loggedIn, searchResult = null, searchDetail = null, searchNotice = null)
         viewModelScope.launch {
             val errors = mutableListOf<String>()
             val allItems = mutableListOf<ExpressItem>()
@@ -147,7 +153,8 @@ class ExpressViewModel @Inject constructor(
                             }
                         }
                         Platform.RYLL -> {
-                            val d = lookupRyllDetail(no)
+                            // 必须带 token：mobileCheck 验证态绑定会话，无 token 详情永远不出取件码段
+                            val d = lookupRyllDetail(no, cred.token)
                             when {
                                 d == null || d.statusName.contains("签收") -> tracked.remove(no)
                                 else -> add(
@@ -348,7 +355,7 @@ class ExpressViewModel @Inject constructor(
                 // 2) 圆通单号（YT+13 数字）→ 如意邻里轨迹 + 拼多多取件码并行（互不阻断，合并展示）
                 if (RYLL_WAYBILL_REGEX.matches(no)) {
                     coroutineScope {
-                        val detailDef = async { lookupRyllDetail(no) }
+                        val detailDef = async { lookupRyllDetail(no, creds[Platform.RYLL]?.token) }
                         val pddDef = async {
                             creds[Platform.PDD]?.let { c ->
                                 try {
@@ -360,14 +367,23 @@ class ExpressViewModel @Inject constructor(
                         }
                         val detail = detailDef.await()
                         val code = pddDef.await()
-                        if (detail != null || code != null) {
+                        // 如意邻里详情已直出取件码（owner 单/验证态已置位）→ 直接用，不再引导尾号验证
+                        val ryllCode = code ?: detail?.pickupCode
+                            ?.takeIf { it.isNotBlank() }
+                            ?.let { com.aggapp.core.model.PickupCode(no, Platform.RYLL, it) }
+                        if (detail != null || ryllCode != null) {
                             val signed = detail != null &&
                                 (detail.status.contains("SIGN", true) || detail.statusName.contains("签收"))
-                            if (!signed) addTracked(no, if (code != null) Platform.PDD else Platform.RYLL)
+                            if (!signed) addTracked(no, if (ryllCode != null) ryllCode.platform else Platform.RYLL)
+                            // 详情无码且未签收 → 引导尾号验证（mobileCheck 验证态绑定如意邻里 token 会话）
+                            val needSuffix = ryllCode == null && detail != null && !signed &&
+                                creds[Platform.RYLL] != null
                             _ui.value = _ui.value.copy(
                                 searching = false,
                                 searchDetail = detail,
-                                searchResult = code,
+                                searchResult = ryllCode,
+                                needSuffixFor = if (needSuffix) no else null,
+                                searchNotice = if (needSuffix) "该单需验证收件手机后 4 位才能取到取件码" else null,
                             )
                             return@coroutineScope
                         }
@@ -437,11 +453,14 @@ class ExpressViewModel @Inject constructor(
         }
     }
 
-    /** 如意邻里查件（纯查询不置 state，调用方合并展示；null=查无此单/网络异常） */
-    private suspend fun lookupRyllDetail(no: String): com.aggapp.platform.ryll.RyllOrderDetail? {
+    /** 如意邻里查件（纯查询不置 state，调用方合并展示；null=查无此单/网络异常；带 token 复用 mobileCheck 验证态） */
+    private suspend fun lookupRyllDetail(
+        no: String,
+        token: String? = null,
+    ): com.aggapp.platform.ryll.RyllOrderDetail? {
         val adapter = adapters.getValue(Platform.RYLL) as com.aggapp.platform.ryll.RyllAdapter
         return try {
-            adapter.queryOrderDetail(no)
+            adapter.queryOrderDetail(no, token)
         } catch (e: Exception) {
             null
         }
@@ -455,7 +474,11 @@ class ExpressViewModel @Inject constructor(
         }
     }
 
-    /** 顺丰单号 + 手机后4位验证查询（v2/getWaybillPickupCode，逐驿站尝试） */
+    /**
+     * 单号 + 手机后4位验证查询：
+     * YT 单 → 如意邻里 mobileCheck（验证态绑定 token 会话）后重查详情出码；
+     * 其他 → 顺丰 v2/getWaybillPickupCode（逐驿站尝试）。
+     */
     fun lookupWithSuffix(suffix: String) {
         val no = _ui.value.needSuffixFor ?: return
         val s = suffix.trim()
@@ -463,15 +486,23 @@ class ExpressViewModel @Inject constructor(
             _ui.value = _ui.value.copy(searchNotice = "请输入 4 位数字手机尾号")
             return
         }
-        val cred = sessionRepo.credentials.value[Platform.SF] ?: run {
-            _ui.value = _ui.value.copy(searchNotice = "请先在「我的」页登录顺丰")
+        val isRyll = RYLL_WAYBILL_REGEX.matches(no)
+        val plat = if (isRyll) Platform.RYLL else Platform.SF
+        val cred = sessionRepo.credentials.value[plat] ?: run {
+            _ui.value = _ui.value.copy(searchNotice = "请先在「我的」页登录${platformLabel(plat)}")
             return
         }
         _ui.value = _ui.value.copy(searching = true, searchNotice = null)
         viewModelScope.launch {
             try {
-                val adapter = adapters.getValue(Platform.SF) as com.aggapp.platform.sf.SfAdapter
-                val code = adapter.fetchPickupCodeWithSuffix(cred, no, s)
+                val code = if (isRyll) {
+                    (adapters.getValue(Platform.RYLL) as com.aggapp.platform.ryll.RyllAdapter)
+                        .fetchPickupCodeWithTail(cred, no, s)
+                } else {
+                    (adapters.getValue(Platform.SF) as com.aggapp.platform.sf.SfAdapter)
+                        .fetchPickupCodeWithSuffix(cred, no, s)
+                }
+                if (code != null) addTracked(no, plat)
                 _ui.value = if (code != null) {
                     _ui.value.copy(searching = false, searchResult = code, needSuffixFor = null)
                 } else {
@@ -484,6 +515,11 @@ class ExpressViewModel @Inject constructor(
                 _ui.value = _ui.value.copy(searching = false, searchNotice = "查询失败：${e.message}")
             }
         }
+    }
+
+    /** 收回尾号验证引导（点关闭/空白处） */
+    fun dismissSuffix() {
+        _ui.value = _ui.value.copy(needSuffixFor = null, searchNotice = null)
     }
 
     fun clearSearch() {

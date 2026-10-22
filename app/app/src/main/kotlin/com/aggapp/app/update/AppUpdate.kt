@@ -1,4 +1,4 @@
-package com.aggapp.app.update
+﻿package com.aggapp.app.update
 
 import android.content.Context
 import android.content.Intent

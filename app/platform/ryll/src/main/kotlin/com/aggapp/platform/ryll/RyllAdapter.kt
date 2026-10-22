@@ -44,6 +44,7 @@ class RyllAdapter @Inject constructor(
         OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
+            .addInterceptor(com.aggapp.platform.api.NetDebug.interceptor)
             .build(),
     )
 
@@ -200,9 +201,9 @@ class RyllAdapter @Inject constructor(
 
     // ============ 取件码（列表直出 → 查件详情兜底） ============
 
-    /** 查件详情（orderDetailByWayBillNo 实测打通，visitor 单也可查；null=查无此单） */
-    suspend fun queryOrderDetail(trackingNo: String): RyllOrderDetail? =
-        client.queryOrderDetail(trackingNo.trim().uppercase())
+    /** 查件详情（orderDetailByWayBillNo 实测打通，visitor 单也可查；null=查无此单；带 token 以复用 mobileCheck 验证态） */
+    suspend fun queryOrderDetail(trackingNo: String, token: String? = null): RyllOrderDetail? =
+        client.queryOrderDetail(trackingNo.trim().uppercase(), token)
 
     override suspend fun fetchPickupCode(cred: Credential, expressId: String): PickupCode? {
         // ① 列表内直接取（station 网关未打通时为空，不阻断）
@@ -210,11 +211,27 @@ class RyllAdapter @Inject constructor(
             fetchExpressList(cred, 1).firstOrNull { it.id == expressId }?.pickupCode
         }.getOrNull()
         if (fromList != null) return PickupCode(expressId, Platform.RYLL, fromList)
-        // ② 查件详情兜底：已到驿站且 owner 单带取件码才返回（visitor 单无码，UI 走轨迹卡片）
-        val detail = client.queryOrderDetail(expressId) ?: return null
+        // ② 查件详情兜底：owner 单直出；visitor 单无码（mobileCheck 验证态未置位），UI 走尾号引导
+        val detail = client.queryOrderDetail(expressId, cred.token) ?: return null
         return detail.pickupCode
             ?.takeIf { it.isNotBlank() }
             ?.let { PickupCode(expressId, Platform.RYLL, it) }
+    }
+
+    /**
+     * 手机后四位验证取件码（2026-10-22 全链实测打通）：
+     * ① mobileCheck（验证态绑定 token 会话）→ ② 重查详情出 recieveOrderDetailResponse.value.stationCode。
+     * 尾号错误返回 false 不报错；已签收单恒 true（服务端不设防）。
+     */
+    suspend fun fetchPickupCodeWithTail(cred: Credential, expressId: String, lastFour: String): PickupCode? {
+        if (cred.token.isBlank()) throw PlatformError.NeedRelogin(platform)
+        val no = expressId.trim().uppercase()
+        val ok = client.mobileCheck(cred.token, lastFour.trim(), no)
+        if (!ok) return null // 尾号错误：UI 提示重输
+        val detail = client.queryOrderDetail(no, cred.token) ?: return null
+        return detail.pickupCode
+            ?.takeIf { it.isNotBlank() }
+            ?.let { PickupCode(no, Platform.RYLL, it) }
     }
 
     companion object {

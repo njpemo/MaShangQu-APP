@@ -14,26 +14,21 @@ android {
         applicationId = "com.aggapp.app"
         minSdk = 26
         targetSdk = 34
-        // 版本单一来源：update/latest.json（发版时先改它）；缺省回退 epoch 分钟
-        val updateJson = rootProject.file("../update/latest.json")
-        if (updateJson.exists()) {
-            val text = updateJson.readText()
-            versionCode = Regex("\"versionCode\"\\s*:\\s*(\\d+)").find(text)
-                ?.groupValues?.get(1)?.toInt()
-                ?: (System.currentTimeMillis() / 60000L).toInt()
-            versionName = Regex("\"versionName\"\\s*:\\s*\"([^\"]+)\"").find(text)
-                ?.groupValues?.get(1)
-                ?: ("0.1." + (System.currentTimeMillis() / 60000L % 100000))
-        } else {
-            versionCode = (System.currentTimeMillis() / 60000L).toInt()
-            versionName = "0.1." + (System.currentTimeMillis() / 60000L % 100000)
-        }
+        // 每次构建自动递增（epoch 分钟），确保 adb install -r 同名包也能命中更新
+        versionCode = 8
+        versionName = "1.0.7"
     }
     buildToolsVersion = "34.0.0"
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            // 蒲公英分发：用 debug 签名保证可安装（与已分发版本签名一致）
+            signingConfig = signingConfigs.getByName("debug")
+        }
+        debug {
+            // 调试包独立包名，与 release 包共存（调试日志导出/全量请求日志仅 debug 包开启）
+            applicationIdSuffix = ".debug"
         }
     }
     compileOptions {
@@ -41,9 +36,15 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures {
-        compose = true
-        buildConfig = true
+    buildFeatures { compose = true }
+
+    // APK 文件名：码上取全拼 + 版本号，如 mashangqu-v1.0.1.apk；debug 包 mashangqu-debug-v1.0.1.apk
+    applicationVariants.all {
+        val debugSuffix = if (buildType.name == "debug") "-debug" else ""
+        outputs.all {
+            (this as? com.android.build.gradle.internal.api.BaseVariantOutputImpl)
+                ?.outputFileName = "mashangqu${debugSuffix}-v${versionName}.apk"
+        }
     }
 }
 
@@ -51,7 +52,6 @@ dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:network"))
     implementation(project(":core:storage"))
-    implementation(project(":core:yyb"))
     implementation(project(":platform:api"))
     implementation(project(":platform:pdd"))
     implementation(project(":platform:taobao"))
@@ -78,5 +78,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.zxing.core)
     implementation("androidx.webkit:webkit:1.11.0") // WebViewAssetLoader：极验页需 https origin（file:// origin 为 null 会被 gt4.js 拒绝）
+    implementation("io.coil-kt:coil-compose:2.6.0") // 验证题图片选项（收货地址截图等）异步加载
+    implementation("androidx.browser:browser:1.8.0") // Chrome Custom Tabs：PDD 验证页反 WebView 渲染隐藏，必须用真 Chrome 管线显示
 }
 
