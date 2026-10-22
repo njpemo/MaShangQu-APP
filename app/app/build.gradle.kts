@@ -17,6 +17,12 @@ android {
         // 每次构建自动递增（epoch 分钟），确保 adb install -r 同名包也能命中更新
         versionCode = (System.currentTimeMillis() / 60000L).toInt()
         versionName = "0.1." + (System.currentTimeMillis() / 60000L % 100000)
+        // 蒲公英 API Key 不入库：在 app/local.properties 中配置 pgyerApiKey=xxx
+        val pgyerKey = rootProject.file("local.properties").takeIf { it.exists() }
+            ?.readLines()?.firstOrNull { it.startsWith("pgyerApiKey=") }
+            ?.substringAfter('=')?.trim() ?: ""
+        buildConfigField("String", "PGYER_API_KEY", "\"$pgyerKey\"")
+        buildConfigField("String", "PGYER_APP_KEY", "\"65c8b01fe3d923b6fcd36683d20ac4c9\"")
     }
     buildToolsVersion = "34.0.0"
 
@@ -30,7 +36,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
 }
 
 dependencies {

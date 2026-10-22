@@ -23,6 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.FileProvider
+import com.aggapp.app.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -44,8 +45,9 @@ import java.util.concurrent.TimeUnit
  */
 object PgyerUpdate {
 
-    private const val API_KEY = "f692e5aa3d007b21a039f97d9d366cb8"
-    private const val APP_KEY = "65c8b01fe3d923b6fcd36683d20ac4c9"
+    // API Key 经 BuildConfig 注入（app/local.properties 配置 pgyerApiKey=xxx），不硬编码入库
+    private val API_KEY = BuildConfig.PGYER_API_KEY
+    private const val APP_KEY = BuildConfig.PGYER_APP_KEY
 
     private const val CHECK_URL = "https://www.pgyer.com/apiv2/app/check"
 

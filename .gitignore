@@ -44,3 +44,4 @@ app/.gradle/
 Thumbs.db
 .DS_Store
 /ryll_vcode.png
+*.log

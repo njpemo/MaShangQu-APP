@@ -47,7 +47,7 @@ class MainViewModel @Inject constructor(
         ),
         Platform.TAOBAO to Credential(
             Platform.TAOBAO, "mock",
-            extra = mapOf("mobile" to "13800000000"),
+            extra = mapOf("mobile" to "13800000000"), // mock 占位号
             capturedAt = 0,
         ),
         Platform.JD to Credential(Platform.JD, "mock", capturedAt = 0),
