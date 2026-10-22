@@ -49,12 +49,11 @@ cd app
 
 ## 发版流程
 
-版本单一来源：`update/latest.json`。
+更新源为主：`https://msq.12.ink/api/check.php`（虚拟主机 PHP 代理，服务端持有蒲公英 Key，见 `server/check.php`），兜底为 jsDelivr / GitHub raw 静态源 `update/latest.json`。
 
-1. 修改 `update/latest.json` 的 `versionCode` / `versionName` / `changelog`；
-2. `.\gradlew.bat assembleRelease`（versionCode/versionName 自动取自 latest.json）；
-3. APK 上传蒲公英（API Key 只存于本机 `app/local.properties`，仅发版上传用）或发 GitHub Release；
-4. 把下载直链填回 `latest.json` 的 `apkUrl`，提交推送 → 已装用户启动即收到更新提示。
+1. 修改 `update/latest.json`（versionCode/versionName），`.\gradlew.bat assembleRelease`；
+2. APK 上传蒲公英即完成发版——check.php 自动返回最新包信息（versionCode 取包上传时间，无需手动维护）；
+3. 可选：把下载直链同步进 `latest.json` 推送，作为兜底源。
 
 ## 项目结构
 

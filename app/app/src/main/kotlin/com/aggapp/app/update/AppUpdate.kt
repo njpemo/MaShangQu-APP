@@ -32,19 +32,21 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
- * 应用内更新（JSON 更新源方案，零密钥）：
- * 版本信息发布在仓库 update/latest.json，App 经 jsDelivr CDN（国内可直连）读取，
- * 失败降级 GitHub raw。全程不携带任何 API Key，APK 内无密钥可提取。
+ * 应用内更新（零密钥方案）：
+ * 主更新源为自建虚拟主机接口（https://msq.12.ink/api/check.php，服务端持有蒲公英 Key，
+ * 见仓库 server/check.php），失败依次降级 jsDelivr 静态源、GitHub raw 静态源。
+ * 客户端全程不携带任何 API Key，APK 内无密钥可提取。
  *
- * 发版流程（Key 只在开发机 local.properties，仅蒲公英上传用）：
- * 1. 修改 update/latest.json 的 versionCode/versionName/apkUrl/changelog
- * 2. gradlew assembleRelease（versionCode/versionName 自动取自 latest.json）
- * 3. APK 上传蒲公英 → 把蒲公英下载短链填入 apkUrl（或用 GitHub Release 直链）→ 提交推送
+ * 发版流程：
+ * 1. gradlew assembleRelease（versionCode 取自 update/latest.json）
+ * 2. APK 上传蒲公英即完成发版——check.php 自动读到最新包信息，无需改任何文件
+ * 3. 静态兜底源（update/latest.json）可选同步更新
  */
 object AppUpdate {
 
-    /** 更新源：jsDelivr 优先（国内直连），GitHub raw 兜底；@main 指向 main 分支 */
+    /** 更新源：自建虚拟主机接口（服务端持有蒲公英 Key）优先，jsDelivr / GitHub raw 为兜底 */
     private val JSON_URLS = listOf(
+        "https://msq.12.ink/api/check.php",
         "https://cdn.jsdelivr.net/gh/njpemo/mashangqu@main/update/latest.json",
         "https://raw.githubusercontent.com/njpemo/mashangqu/main/update/latest.json",
     )

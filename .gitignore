@@ -45,3 +45,4 @@ Thumbs.db
 .DS_Store
 /ryll_vcode.png
 *.log
+/server/config.php
