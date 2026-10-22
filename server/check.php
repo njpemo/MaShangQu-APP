@@ -8,10 +8,10 @@
  * 部署步骤：
  * 1. 把本文件上传到虚拟主机 api/ 目录
  * 2. 同目录再上传 config.php（内容见 config.example.php，此文件不入 git 仓库）
- * 3. 访问 https://msq.12.ink/api/check.php 应返回 JSON（无新版本时 versionCode 为 0 或等于线上版本）
+ * 3. 访问 https://msq.l2.ink/api/check.php 应返回 JSON
  *
- * versionCode 规则：取蒲公英「包上传时间」的 epoch 秒 ÷ 60，
- * 与 App 构建时 versionCode（构建时刻 epoch 毫秒 ÷ 60000）同一量纲，单调可比。
+ * versionCode 规则：由蒲公英包的 versionName（如 1.0.6）按语义化版本换算：
+ * major*1000000 + minor*1000 + patch，App 端同规则换算本地 versionName 后比对。
  */
 
 declare(strict_types=1);
@@ -63,10 +63,15 @@ if (!is_array($pg) || ($pg['code'] ?? -1) !== 0 || !is_array($pg['data'] ?? null
 
 $d = $pg['data'];
 
-// 无新版本时蒲公英返回 buildHaveNewVersion=false，但 App 端自行按 versionCode 比对更稳，
-// 所以这里始终输出线上最新包信息；App 端 versionCode 大于本地才提示。
+// versionCode 用 versionName 语义化版本号换算（1.0.6 → 1_000_006），App 端同规则比对。
+// 比依赖蒲公英 buildUpdated/buildBuildVersion 字段更稳，不随蒲公英接口字段变化而失效。
+$code = 0;
+if (preg_match('/(\d+)\.(\d+)\.(\d+)/', (string)($d['buildVersion'] ?? ''), $m)) {
+    $code = ((int)$m[1]) * 1000000 + ((int)$m[2]) * 1000 + ((int)$m[3]);
+}
+
 $out = [
-    'versionCode' => isset($d['buildUpdated']) ? intdiv((int)$d['buildUpdated'], 60) : 0,
+    'versionCode' => $code,
     'versionName' => (string)($d['buildVersion'] ?? ''),
     'apkUrl'      => (string)($d['downloadURL'] ?? ''),
     'changelog'   => (string)($d['buildUpdateDescription'] ?? ''),

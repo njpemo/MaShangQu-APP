@@ -46,7 +46,7 @@ object AppUpdate {
 
     /** 更新源：自建虚拟主机接口（服务端持有蒲公英 Key）优先，jsDelivr / GitHub raw 为兜底 */
     private val JSON_URLS = listOf(
-        "https://msq.12.ink/api/check.php",
+        "https://msq.l2.ink/api/check.php",
         "https://cdn.jsdelivr.net/gh/njpemo/mashangqu@main/update/latest.json",
         "https://raw.githubusercontent.com/njpemo/mashangqu/main/update/latest.json",
     )
@@ -64,8 +64,16 @@ object AppUpdate {
         val changelog: String,
     )
 
+    /** "1.0.6" → 1_000_006；与服务端 check.php 同规则，解析失败返回 0 */
+    fun semverCode(versionName: String?): Int {
+        val m = Regex("(\\d+)\\.(\\d+)\\.(\\d+)").find(versionName ?: "") ?: return 0
+        return m.groupValues[1].toInt() * 1_000_000 +
+            m.groupValues[2].toInt() * 1_000 +
+            m.groupValues[3].toInt()
+    }
+
     /**
-     * 拉取更新源并与本地 versionCode 比对。
+     * 拉取更新源并与本地 versionCode（由本地 versionName 语义化换算）比对。
      * 网络失败 / 无新版本均返回 null，静默跳过。
      */
     suspend fun check(currentVersionCode: Int): UpdateInfo? = withContext(Dispatchers.IO) {
@@ -164,15 +172,12 @@ fun AppUpdateEffect() {
     var downloadError by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        val currentCode = try {
-            context.packageManager.getPackageInfo(context.packageName, 0).let {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) it.longVersionCode.toInt()
-                else @Suppress("DEPRECATION") it.versionCode
-            }
+        val currentName = try {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
         } catch (_: Exception) {
-            0
+            null
         }
-        info = AppUpdate.check(currentCode)
+        info = AppUpdate.check(AppUpdate.semverCode(currentName))
     }
 
     info?.let { u ->
