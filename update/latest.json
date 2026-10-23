@@ -1,6 +1,6 @@
 ﻿{
-    "versionCode":  8,
-    "versionName":  "1.0.7",
-    "apkUrl":  "https://github.com/njpemo/mashangqu/releases/download/v1.0.7/mashangqu-v1.0.7.apk",
-    "changelog":  "性能优化（快速转场/静默刷新）、全部平台码一屏免滚动、进入页面自动刷新、零密钥自建更新源、淘宝登录二次验证兜底、新图标"
+    "versionCode":  9,
+    "versionName":  "1.0.8",
+    "apkUrl":  "https://github.com/njpemo/mashangqu/releases/download/v1.0.8/mashangqu-v1.0.8.apk",
+    "changelog":  "修复更新误弹窗（更新源精简）；修复快递页刷新按钮无反应；修复如意邻里包裹列表获取不到；取码失败日志可见；淘宝身份码 5026 错误翻译并引导激活菜鸟驿站"
 }

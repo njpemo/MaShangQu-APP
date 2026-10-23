@@ -91,6 +91,12 @@ internal class TaobaoMtopClient(private val http: OkHttpClient) {
                 }
                 "SESSION_EXPIRED" in ret -> throw PlatformError.NeedRelogin(Platform.TAOBAO)
                 "LIMIT" in ret -> throw PlatformError.RateLimited(Platform.TAOBAO)
+                // waybill-5026：账号在菜鸟侧无用户档案（实测：登录态有效、列表接口正常，仅身份码被拒，
+                // 2026-10-23 真机日志复现）→ 需用户先在手机淘宝打开一次菜鸟驿站激活档案
+                "waybill-5026" in ret || "手淘用户不存在" in ret -> throw PlatformError.NeedActivate(
+                    Platform.TAOBAO,
+                    "淘宝账号在菜鸟驿站暂无档案，请先在手机淘宝激活菜鸟驿站",
+                )
                 "FAIL_SYS_ILLEGAL_ACCESS" in ret -> throw PlatformError.ParseFailed(
                     Platform.TAOBAO,
                     "$ret（网关拒绝直调，需降级 WebView 注入 lib.mtop 方案，见文档 §5.4.1）",

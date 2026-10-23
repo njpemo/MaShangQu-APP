@@ -242,13 +242,18 @@ internal class RyllClient(private val http: OkHttpClient) {
 
     // ============ 内部工具 ============
 
-    /** 统一请求：source 必带头 + jwt-token（token 非空时）；JSON body 或空 POST */
+    /** 统一请求：source 必带头 + jwt-token（token 非空时）；JSON body 用 json CT，空 body 保持 form（实测 2026-10-23：
+     *  驿站网关 waitAllOrderList/queryCabinetByPhone 在 x-www-form-urlencoded 下报 EP0002 程序处理异常） */
     private fun request(method: String, url: String, token: String?, body: String? = null): Request {
         val b = Request.Builder().url(url)
             .header("source", SOURCE)
             .header("Accept", "application/json, text/plain, */*")
         if (!token.isNullOrBlank()) b.header("jwt-token", token)
-        if (method == "POST") b.post((body ?: "").toRequestBody(FORM_MEDIA)) else b.get()
+        if (method == "POST") {
+            val payload = body ?: ""
+            val media = if (payload.trimStart().startsWith("{")) JSON_MEDIA else FORM_MEDIA
+            b.post(payload.toRequestBody(media))
+        } else b.get()
         return b.build()
     }
 
@@ -312,6 +317,7 @@ internal class RyllClient(private val http: OkHttpClient) {
         const val STATION_BASE = "https://yizhan.mamayz.com:49197/opYZAppPackage/"
 
         private val FORM_MEDIA = "application/x-www-form-urlencoded".toMediaType()
+        private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
 
         private fun urlEnc(v: String) = java.net.URLEncoder.encode(v, "UTF-8")
     }

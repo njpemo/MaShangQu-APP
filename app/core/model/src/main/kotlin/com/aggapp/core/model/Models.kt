@@ -61,6 +61,7 @@ data class PlatformLoginState(
 
 sealed class PlatformError(message: String) : Exception(message) {
     class NeedRelogin(val platform: Platform) : PlatformError("登录态失效")   // → UI 标记需重登
+    class NeedActivate(val platform: Platform, val detail: String) : PlatformError("需激活：$detail") // → UI 弹引导（如淘宝/菜鸟档案未建立）
     class SignFailed(val platform: Platform, val detail: String) : PlatformError("签名失败：$detail")
     class RateLimited(val platform: Platform) : PlatformError("请求过于频繁")
     class ParseFailed(val platform: Platform, val detail: String) : PlatformError("解析失败：$detail")

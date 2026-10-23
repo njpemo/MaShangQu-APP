@@ -96,8 +96,8 @@ fun ExpressScreen(viewModel: ExpressViewModel = hiltViewModel()) {
                         fontSize = 13.sp,
                     )
                 }
-                // 手动刷新
-                IconButton(onClick = viewModel::refresh, enabled = !ui.loading) {
+                // 手动刷新（force=true 绕过 30s 自动刷新节流）
+                IconButton(onClick = { viewModel.refresh(force = true) }, enabled = !ui.loading) {
                     if (ui.loading) {
                         CircularProgressIndicator(
                             Modifier.size(20.dp),
@@ -257,7 +257,7 @@ fun ExpressScreen(viewModel: ExpressViewModel = hiltViewModel()) {
                 ) {
                     Text(ui.error ?: "未知错误", color = MaterialTheme.colorScheme.error)
                     Spacer(Modifier.height(8.dp))
-                    Button(onClick = viewModel::refresh, shape = RoundedCornerShape(12.dp)) { Text("重试") }
+                    Button(onClick = { viewModel.refresh(force = true) }, shape = RoundedCornerShape(12.dp)) { Text("重试") }
                 }
 
                 ui.stations.isEmpty() -> Text(

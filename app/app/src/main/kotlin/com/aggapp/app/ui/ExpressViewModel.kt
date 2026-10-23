@@ -7,6 +7,7 @@ import com.aggapp.app.di.PlatformRegistry
 import com.aggapp.app.di.SessionRepository
 import com.aggapp.core.model.Credential
 import com.aggapp.core.model.ExpressItem
+import com.aggapp.platform.api.AppLog
 import com.aggapp.core.model.ExpressStatus
 import com.aggapp.core.model.PickupCode
 import com.aggapp.core.model.Platform
@@ -271,7 +272,8 @@ class ExpressViewModel @Inject constructor(
             for (plat in candidates) {
                 val code = try {
                     adapters.getValue(plat).fetchPickupCode(creds.getValue(plat), no)
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    AppLog.e("Express", "fillCode $no: ${platformLabel(plat)} fetchPickupCode 失败", e)
                     null // 单渠道失败不阻断，继续下一个
                 }
                 if (code != null) {
@@ -335,10 +337,16 @@ class ExpressViewModel @Inject constructor(
                 if (SF_WAYBILL_REGEX.matches(no)) {
                     val cred = creds[Platform.SF]
                     if (cred == null) {
+                        AppLog.w("Express", "lookup $no: 顺丰未登录，跳过")
                         _ui.value = _ui.value.copy(searching = false, searchNotice = "请先在「我的」页登录顺丰")
                         return@launch
                     }
-                    val code = adapters.getValue(Platform.SF).fetchPickupCode(cred, no)
+                    val code = try {
+                        adapters.getValue(Platform.SF).fetchPickupCode(cred, no)
+                    } catch (e: Exception) {
+                        AppLog.e("Express", "lookup $no: 顺丰 fetchPickupCode 失败", e)
+                        null
+                    }
                     if (code != null) {
                         addTracked(no, Platform.SF)
                         _ui.value = _ui.value.copy(searching = false, searchResult = code)
@@ -361,6 +369,7 @@ class ExpressViewModel @Inject constructor(
                                 try {
                                     adapters.getValue(Platform.PDD).fetchPickupCode(c, no)
                                 } catch (e: Exception) {
+                                    AppLog.e("Express", "lookup $no: 拼多多 fetchPickupCode 失败", e)
                                     null
                                 }
                             }
@@ -392,6 +401,7 @@ class ExpressViewModel @Inject constructor(
                             try {
                                 adapters.getValue(Platform.TAOBAO).fetchPickupCode(c, no)
                             } catch (e: Exception) {
+                                AppLog.e("Express", "lookup $no: 淘宝 fetchPickupCode 失败", e)
                                 null
                             }
                         }
@@ -413,6 +423,7 @@ class ExpressViewModel @Inject constructor(
                     val code = try {
                         adapters.getValue(Platform.TAOBAO).fetchPickupCode(tbCred, no)
                     } catch (e: Exception) {
+                        AppLog.e("Express", "lookup $no: 淘宝 fetchPickupCode 失败", e)
                         null
                     }
                     if (code != null) {
@@ -426,6 +437,7 @@ class ExpressViewModel @Inject constructor(
                     val code = try {
                         adapters.getValue(Platform.PDD).fetchPickupCode(pddCred, no)
                     } catch (e: Exception) {
+                        AppLog.e("Express", "lookup $no: 拼多多 fetchPickupCode 失败", e)
                         null
                     }
                     if (code != null) {
@@ -462,6 +474,7 @@ class ExpressViewModel @Inject constructor(
         return try {
             adapter.queryOrderDetail(no, token)
         } catch (e: Exception) {
+            AppLog.e("Express", "lookup $no: 如意邻里 queryOrderDetail 失败", e)
             null
         }
     }

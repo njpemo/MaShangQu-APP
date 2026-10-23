@@ -25,6 +25,8 @@ data class IdCodeUiState(
     val selected: Platform = Platform.SF,
     val countdownSec: Long? = null,
     val loading: Boolean = false,
+    /** 淘宝账号在菜鸟侧无档案（waybill-5026）→ 弹「激活菜鸟驿站」引导弹窗 */
+    val needCainiaoActivate: Boolean = false,
 )
 
 @HiltViewModel
@@ -66,6 +68,12 @@ class MainViewModel @Inject constructor(
                     real[p] = true
                 } catch (e: PlatformError.NeedRelogin) {
                     real[p] = false // 凭据失效：不展示码
+                } catch (e: PlatformError.NeedActivate) {
+                    real[p] = false
+                    com.aggapp.platform.api.AppLog.w("IdCode", "${p.label} fetchIdentityCode: ${e.detail}")
+                    if (p == Platform.TAOBAO) {
+                        _state.value = _state.value.copy(needCainiaoActivate = true)
+                    }
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
@@ -103,6 +111,11 @@ class MainViewModel @Inject constructor(
         _state.value = _state.value.copy(selected = platform)
     }
 
+    /** 关闭「激活菜鸟驿站」引导弹窗 */
+    fun dismissCainiaoActivate() {
+        _state.value = _state.value.copy(needCainiaoActivate = false)
+    }
+
     private fun tick() {
         val s = _state.value
         val selected = s.codes[s.selected] ?: return
@@ -122,6 +135,11 @@ class MainViewModel @Inject constructor(
                     codes = _state.value.codes + (platform to code),
                     isReal = _state.value.isReal + (platform to true),
                 )
+            } catch (e: PlatformError.NeedActivate) {
+                com.aggapp.platform.api.AppLog.w("IdCode", "${platform.label} fetchIdentityCode: ${e.detail}")
+                if (platform == Platform.TAOBAO) {
+                    _state.value = _state.value.copy(needCainiaoActivate = true)
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             }

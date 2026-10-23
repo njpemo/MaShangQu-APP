@@ -1,6 +1,8 @@
 package com.aggapp.app.ui
 
+import android.content.Intent
 import android.graphics.Bitmap
+import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -30,6 +32,7 @@ import androidx.compose.material.icons.outlined.Fullscreen
 import androidx.compose.material3.AssistChip
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clip
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -41,6 +44,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -56,6 +60,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -100,6 +105,11 @@ fun IdCodeScreen(vm: MainViewModel) {
     var fullscreen by remember { mutableStateOf(false) }
     // 全屏显示全部平台身份码（「全部平台码」按钮进入）
     var showAllCodes by remember { mutableStateOf(false) }
+
+    // 淘宝账号菜鸟档案未激活（waybill-5026）→ 引导弹窗
+    if (state.needCainiaoActivate) {
+        CainiaoActivateDialog(onDismiss = { vm.dismissCainiaoActivate() })
+    }
 
     // 每次打开页面刷新（如意邻里身份码非纯静态，回到本页时重新拉取）
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -479,4 +489,48 @@ fun IdCodeScreen(vm: MainViewModel) {
             }
         }
     }
+}
+
+/**
+ * 淘宝身份码取码被拒（waybill-5026 手淘用户不存在）引导弹窗：
+ * 账号在菜鸟侧无用户档案，提供两个菜鸟驿站页面链接，点击拉起淘宝/浏览器完成激活。
+ */
+@Composable
+private fun CainiaoActivateDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val links = listOf(
+        "菜鸟驿站·身份码" to
+            "https://pages-fast.m.taobao.com/wow/z/uniapp/1011717/last-mile-fe/end-collect-platform/identity-code",
+        "菜鸟驿站·学堂" to
+            "https://pages-fast.m.taobao.com/wow/z/uniapp/1011717/last-mile-fe/end-collect-platform/school",
+    )
+    fun open(url: String) {
+        context.startActivity(
+            Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("需要激活菜鸟驿站") },
+        text = {
+            Column {
+                Text("淘宝账号在菜鸟驿站暂无档案，暂无法获取身份码。点击下方链接跳转淘宝，打开一次菜鸟驿站完成激活后，回到本页刷新即可。")
+                Spacer(Modifier.height(12.dp))
+                for ((label, url) in links) {
+                    Text(
+                        label,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clickable { open(url) }
+                            .padding(vertical = 6.dp),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("我知道了") }
+        },
+    )
 }

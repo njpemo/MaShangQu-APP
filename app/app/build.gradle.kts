@@ -15,8 +15,8 @@ android {
         minSdk = 26
         targetSdk = 34
         // 每次构建自动递增（epoch 分钟），确保 adb install -r 同名包也能命中更新
-        versionCode = 8
-        versionName = "1.0.7"
+        versionCode = 9
+        versionName = "1.0.8"
     }
     buildToolsVersion = "34.0.0"
 

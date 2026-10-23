@@ -159,22 +159,39 @@ class RyllAdapter @Inject constructor(
         runCatching {
             val data = client.waitAllOrderList(cred.token, flag = 1)
             data.optArr("waitTakeOrderResponseList")?.forEach { el ->
-                (el as? JsonObject)?.let { mapExpress(it, ExpressStatus.WAIT_PICKUP) }
-                    ?.let { if (it.id.isNotBlank()) items[it.id] = it }
+                (el as? JsonObject)?.forEachPkg { pkg ->
+                    mapExpress(pkg, ExpressStatus.WAIT_PICKUP)
+                        ?.let { if (it.id.isNotBlank()) items[it.id] = it }
+                }
             }
-        }
+        }.onFailure { com.aggapp.platform.api.AppLog.e("Ryll", "waitAllOrderList 失败", it) }
         // 柜机/货架包裹（queryCabinetByPhone，README §5.2 shelfPackageList）
         runCatching {
             val data = client.queryCabinetByPhone(cred.token)
             for (key in listOf("waitTakeOrderResponseList", "takeOrderResponseList")) {
                 data.optArr(key)?.forEach { el ->
-                    (el as? JsonObject)?.let { o ->
-                        mapExpress(o, if (key.startsWith("wait")) ExpressStatus.WAIT_PICKUP else ExpressStatus.PICKED)
-                    }?.let { if (it.id.isNotBlank()) items[it.id] = it }
+                    (el as? JsonObject)?.forEachPkg { pkg ->
+                        mapExpress(pkg, if (key.startsWith("wait")) ExpressStatus.WAIT_PICKUP else ExpressStatus.PICKED)
+                            ?.let { if (it.id.isNotBlank()) items[it.id] = it }
+                    }
                 }
             }
-        }
+        }.onFailure { com.aggapp.platform.api.AppLog.e("Ryll", "queryCabinetByPhone 失败", it) }
         return items.values.toList()
+    }
+
+    /**
+     * 遍历响应里的包裹对象。实测（2026-10-23 真机日志）：列表元素是**站点对象**
+     * （stationCode/stationName/orderList[]），包裹嵌在 orderList[] 内 → 拍平遍历；
+     * 兼容旧扁平结构（元素本身即包裹，无 orderList 键时按单元素处理）。
+     */
+    private inline fun JsonObject.forEachPkg(block: (JsonObject) -> Unit) {
+        val pkgs = optArr("orderList")
+        if (pkgs != null) {
+            pkgs.forEach { el -> (el as? JsonObject)?.let(block) }
+        } else {
+            block(this)
+        }
     }
 
     /**

@@ -1,4 +1,4 @@
-﻿package com.aggapp.app.update
+package com.aggapp.app.update
 
 import android.content.Context
 import android.content.Intent
@@ -33,9 +33,8 @@ import java.util.concurrent.TimeUnit
 
 /**
  * 应用内更新（零密钥方案）：
- * 主更新源为自建虚拟主机接口（https://msq.12.ink/api/check.php，服务端持有蒲公英 Key，
- * 见仓库 server/check.php），失败依次降级 jsDelivr 静态源、GitHub raw 静态源。
- * 客户端全程不携带任何 API Key，APK 内无密钥可提取。
+ * 主更新源为自建虚拟主机接口（https://msq.l2.ink/api/check.php，服务端持有蒲公英 Key，
+ * 见仓库 server/check.php）。客户端全程不携带任何 API Key，APK 内无密钥可提取。
  *
  * 发版流程：
  * 1. gradlew assembleRelease（versionCode 取自 update/latest.json）
@@ -44,11 +43,9 @@ import java.util.concurrent.TimeUnit
  */
 object AppUpdate {
 
-    /** 更新源：自建虚拟主机接口（服务端持有蒲公英 Key）优先，jsDelivr / GitHub raw 为兜底 */
+    /** 更新源：自建虚拟主机接口（服务端持有蒲公英 Key）。静态源曾因 jsDelivr 缓存旧 JSON（残留大 versionCode）导致误弹更新，已移除 */
     private val JSON_URLS = listOf(
         "https://msq.l2.ink/api/check.php",
-        "https://cdn.jsdelivr.net/gh/njpemo/mashangqu@main/update/latest.json",
-        "https://raw.githubusercontent.com/njpemo/mashangqu/main/update/latest.json",
     )
 
     private val client: OkHttpClient = OkHttpClient.Builder()
