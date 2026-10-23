@@ -11,7 +11,7 @@
 [![Jetpack Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4?logo=jetpackcompose&logoColor=white)](#)
 [![Min SDK](https://img.shields.io/badge/minSdk-26-34A853)](#)
 [![Release](https://img.shields.io/github/v/release/njpemo/mashangqu?color=F57C00)](https://github.com/njpemo/mashangqu/releases)
-[![License](https://img.shields.io/badge/license-个人自用-lightgrey)](#️-免责声明)
+[![License](https://img.shields.io/badge/license-可自用修改·禁商用-lightgrey)](#-许可与免责声明)
 
 </div>
 
@@ -113,15 +113,15 @@ app/
     └── pdd/ taobao/ jd/ sf/ ryll/   平台适配器实现
 ```
 
-## ⚠️ 免责声明
+## 📜 许可与免责声明
 
-本项目**仅供学习交流与个人自用**，**禁止二次分发、禁止商用**。请勿将本项目或其构建产物传播给他人、上传至公开应用渠道，或用于任何商业用途。
+**许可**：欢迎个人学习、下载、修改与自用；**禁止商用**（包括但不限于出售、打包收费分发、引流变现）。
 
-需要特别说明的是：
+**免责**：本项目按「现状」提供，作者不对功能可用性作任何保证。需要特别说明的是：
 
 - 项目部分功能基于对各平台公开客户端接口的研究实现，可能涉及平台用户协议中关于未授权调用的限制，请自行知悉并评估相关风险；
 - 登录凭据仅存储于本机（Keystore + EncryptedSharedPreferences 加密），永不上传、不采集任何用户数据；
-- 使用本项目产生的一切账号风险（包括但不限于风控、功能限制、封禁）由使用者自行承担，与作者无关。
+- 任何人使用或修改本项目产生的一切后果（包括但不限于账号风控、功能限制、封禁及其他损失），均由使用者自行承担，**与作者无关**。
 
 ---
 
