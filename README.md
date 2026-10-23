@@ -11,6 +11,7 @@
 [![Jetpack Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4?logo=jetpackcompose&logoColor=white)](#)
 [![Min SDK](https://img.shields.io/badge/minSdk-26-34A853)](#)
 [![Release](https://img.shields.io/github/v/release/njpemo/mashangqu?color=F57C00)](https://github.com/njpemo/mashangqu/releases)
+[![License](https://img.shields.io/badge/license-个人自用-lightgrey)](#️-免责声明)
 
 </div>
 
@@ -114,7 +115,13 @@ app/
 
 ## ⚠️ 免责声明
 
-本项目**仅供个人学习与自用**，不分发、不商用。凭据仅存储于本机（Keystore + EncryptedSharedPreferences 加密），永不上传。使用本项目产生的一切账号风险由使用者自行承担，请遵守各平台用户协议。
+本项目**仅供学习交流与个人自用**，**禁止二次分发、禁止商用**。请勿将本项目或其构建产物传播给他人、上传至公开应用渠道，或用于任何商业用途。
+
+需要特别说明的是：
+
+- 项目部分功能基于对各平台公开客户端接口的研究实现，可能涉及平台用户协议中关于未授权调用的限制，请自行知悉并评估相关风险；
+- 登录凭据仅存储于本机（Keystore + EncryptedSharedPreferences 加密），永不上传、不采集任何用户数据；
+- 使用本项目产生的一切账号风险（包括但不限于风控、功能限制、封禁）由使用者自行承担，与作者无关。
 
 ---
 
