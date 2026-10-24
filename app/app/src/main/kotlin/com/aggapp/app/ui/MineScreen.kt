@@ -12,11 +12,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -50,6 +50,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -63,7 +64,7 @@ import com.aggapp.core.model.Platform
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MineScreen(vm: MineViewModel = hiltViewModel()) {
+fun MineScreen(vm: MineViewModel = hiltViewModel(), bottomContentPadding: Dp = 0.dp) {
     val state by vm.state.collectAsState()
     val context = LocalContext.current
 
@@ -83,12 +84,16 @@ fun MineScreen(vm: MineViewModel = hiltViewModel()) {
         }
     }
 
-    Scaffold(containerColor = MaterialTheme.colorScheme.background) { pad ->
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+    ) { pad ->
         Column(
             Modifier
                 .padding(pad)
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(rememberScrollState())
+                .padding(bottom = bottomContentPadding),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             // ===== 简洁头部（surface 底，与身份码页/底部导航同风格）=====
@@ -99,7 +104,6 @@ fun MineScreen(vm: MineViewModel = hiltViewModel()) {
             ) {
                 Column(
                     Modifier
-                        .statusBarsPadding()
                         .padding(horizontal = 20.dp, vertical = 14.dp),
                 ) {
                     Text(

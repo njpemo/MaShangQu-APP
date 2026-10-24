@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -12,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -47,6 +47,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -60,7 +61,7 @@ import java.util.Locale
  * 快递页（第一期仅顺丰）：顶部渐变头部 + 运单号查询卡 + 驿站分组包裹列表
  */
 @Composable
-fun ExpressScreen(viewModel: ExpressViewModel = hiltViewModel()) {
+fun ExpressScreen(viewModel: ExpressViewModel = hiltViewModel(), bottomContentPadding: Dp = 0.dp) {
     val ui by viewModel.ui.collectAsState()
     var waybillInput by remember { mutableStateOf("") }
     var suffixInput by remember { mutableStateOf("") }
@@ -79,7 +80,7 @@ fun ExpressScreen(viewModel: ExpressViewModel = hiltViewModel()) {
         // ===== 简洁头部（surface 底，与身份码页/底部导航同风格）=====
         Box(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
             Row(
-                Modifier.statusBarsPadding().padding(horizontal = 20.dp, vertical = 14.dp).fillMaxWidth(),
+                Modifier.padding(horizontal = 20.dp, vertical = 14.dp).fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
@@ -247,7 +248,10 @@ fun ExpressScreen(viewModel: ExpressViewModel = hiltViewModel()) {
 
             // ============ 包裹列表（按驿站分组） ============
             when {
-                ui.loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                ui.loading -> Box(
+                    Modifier.fillMaxSize().padding(bottom = bottomContentPadding),
+                    contentAlignment = Alignment.Center,
+                ) {
                     CircularProgressIndicator(color = Brand.Indigo)
                 }
 
@@ -266,7 +270,7 @@ fun ExpressScreen(viewModel: ExpressViewModel = hiltViewModel()) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
 
-                else -> LazyColumn {
+                else -> LazyColumn(contentPadding = PaddingValues(bottom = 24.dp + bottomContentPadding)) {
                     ui.stations.forEach { group ->
                         item(key = "header_${group.stationName}") {
                             Row(
@@ -291,7 +295,6 @@ fun ExpressScreen(viewModel: ExpressViewModel = hiltViewModel()) {
                             ExpressItemRow(item)
                         }
                     }
-                    item { Spacer(Modifier.height(24.dp)) }
                 }
             }
         }

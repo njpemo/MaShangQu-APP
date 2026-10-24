@@ -3,7 +3,6 @@ package com.aggapp.app.ui
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -11,13 +10,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -52,17 +51,18 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -97,9 +97,11 @@ fun renderCode128(content: String, width: Int = 1000, height: Int = 300): Bitmap
 
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-fun IdCodeScreen(vm: MainViewModel) {
+fun IdCodeScreen(vm: MainViewModel, bottomContentPadding: Dp = 0.dp) {
     val state by vm.state.collectAsState()
     val platforms = Platform.entries.toList()
+    val imageScope = rememberCoroutineScope()
+    val barcodeCache = remember(imageScope) { Code128BitmapCache(imageScope) }
 
     // 双击全屏显示当前平台身份码（单击全屏任意处退出）
     var fullscreen by remember { mutableStateOf(false) }
@@ -121,7 +123,10 @@ fun IdCodeScreen(vm: MainViewModel) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    Scaffold(containerColor = MaterialTheme.colorScheme.background) { pad ->
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+    ) { pad ->
         PullToRefreshBox(
             isRefreshing = state.loading,
             onRefresh = { vm.refreshAll(force = true) },
@@ -130,14 +135,14 @@ fun IdCodeScreen(vm: MainViewModel) {
             Column(
                 Modifier
                     .fillMaxSize()
-                    .verticalScroll(rememberScrollState()),
+                    .verticalScroll(rememberScrollState())
+                    .padding(bottom = bottomContentPadding),
             ) {
                 // ===== 简洁头部（surface 底 + 主色点缀，与底部导航栏同风格）=====
                 Column(
                     Modifier
                         .fillMaxWidth()
                         .background(MaterialTheme.colorScheme.surface)
-                        .statusBarsPadding()
                         .padding(horizontal = 20.dp, vertical = 12.dp),
                 ) {
                     Row(
@@ -268,22 +273,10 @@ fun IdCodeScreen(vm: MainViewModel) {
                                 }
                                 Spacer(Modifier.height(16.dp))
 
-                                val bmp = renderCode128(code.content)
-                                if (bmp != null) {
-                                    Image(
-                                        bitmap = bmp.asImageBitmap(),
-                                        contentDescription = "身份码条形码",
-                                        modifier = Modifier.fillMaxWidth(),
-                                    )
-                                } else {
-                                    Box(
-                                        Modifier
-                                            .fillMaxWidth()
-                                            .height(120.dp)
-                                            .background(Color.LightGray, RoundedCornerShape(12.dp)),
-                                        contentAlignment = Alignment.Center,
-                                    ) { Text("条码渲染失败") }
-                                }
+                                Code128Image(
+                                    code.content, barcodeCache, "身份码条形码",
+                                    Modifier.fillMaxWidth().aspectRatio(10f / 3f),
+                                )
                                 Spacer(Modifier.height(16.dp))
                                 // 码号文字单独显示（对齐 H5 原版 displayValue:false）
                                 Text(
@@ -404,17 +397,10 @@ fun IdCodeScreen(vm: MainViewModel) {
                             fontWeight = FontWeight.Bold,
                         )
                         if (code != null) {
-                            renderCode128(code.content)?.let {
-                                Image(
-                                    bitmap = it.asImageBitmap(),
-                                    contentDescription = "${p.label}身份码条形码",
-                                    contentScale = ContentScale.Fit,
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 24.dp),
-                                )
-                            }
+                            Code128Image(
+                                code.content, barcodeCache, "${p.label}身份码条形码",
+                                Modifier.weight(1f).fillMaxWidth().padding(horizontal = 24.dp),
+                            )
                             Text(
                                 code.content,
                                 fontSize = 13.sp,
@@ -462,17 +448,11 @@ fun IdCodeScreen(vm: MainViewModel) {
                             fontWeight = FontWeight.Bold,
                         )
                         Spacer(Modifier.height(16.dp))
-                        renderCode128(code.content, width = 1400, height = 420)?.let {
-                            Image(
-                                bitmap = it.asImageBitmap(),
-                                contentDescription = "身份码条形码（全屏）",
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(24.dp)
-                                    .aspectRatio(10f / 3f),
-                                contentScale = ContentScale.FillWidth,
-                            )
-                        }
+                        Code128Image(
+                            code.content, barcodeCache, "身份码条形码（全屏）",
+                            Modifier.fillMaxWidth().padding(24.dp).aspectRatio(10f / 3f),
+                            width = 1400, height = 420, contentScale = ContentScale.FillWidth,
+                        )
                         Spacer(Modifier.height(20.dp))
                         Text(
                             code.content,
