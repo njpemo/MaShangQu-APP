@@ -89,7 +89,7 @@ fun AggScaffold(navController: NavHostController) {
             composable("express") { ExpressScreen(bottomContentPadding = bottomContentPadding) }
             composable("mine") { MineScreen(bottomContentPadding = bottomContentPadding) }
         }
-    }, navigation = { backdrop ->
+    }, navigation = { backdrop, interactive ->
         LiquidBottomNavigation(
             items = tabs,
             selectedRoute = current,
@@ -104,6 +104,7 @@ fun AggScaffold(navController: NavHostController) {
             },
             backdrop = backdrop,
             modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth(),
+            enabled = interactive,
         )
     })
 }

@@ -23,6 +23,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.assertWidthIsAtLeast
@@ -50,6 +51,7 @@ class LiquidBottomNavigationTest {
     private val selections = mutableListOf<String>()
     private lateinit var selectedRoute: MutableState<String>
     private lateinit var fontScale: MutableState<Float>
+    private val navigationEnabled = mutableStateOf(true)
     private var focusColor = Color.Unspecified
 
     @Test
@@ -212,6 +214,23 @@ class LiquidBottomNavigationTest {
     }
 
     @Test
+    fun disablingAnActiveDragCancelsItAndBlocksHiddenClicks() {
+        showNavigation()
+        val start = tabCenter("express")
+        val end = tabCenter("mine")
+        navigation().performTouchInput { down(start); moveTo(end, delayMillis = 160) }
+        compose.runOnIdle { navigationEnabled.value = false }
+        navigation().performTouchInput { up() }
+        tab("mine").assertIsNotEnabled().performClick()
+        tab("mine").performSemanticsAction(SemanticsActions.OnClick) { it() }
+        compose.runOnIdle { assertTrue(selections.isEmpty()) }
+        assertEquals(tab("express").fetchSemanticsNode().boundsInRoot.center.x, indicatorCenterX(), 1f)
+        compose.runOnIdle { navigationEnabled.value = true }
+        tab("mine").performClick()
+        compose.runOnIdle { assertEquals(listOf("mine"), selections) }
+    }
+
+    @Test
     fun keyboardFocusOutlineIsVisibleAboveTheSelectedLens() {
         showNavigation()
         val selected = tab("express")
@@ -300,6 +319,7 @@ class LiquidBottomNavigationTest {
                                 if (updateSelectionImmediately) selectedRoute.value = route
                             },
                             backdrop = emptyBackdrop(),
+                            enabled = navigationEnabled.value,
                         )
                     }
                 }

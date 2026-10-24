@@ -1,6 +1,7 @@
 package com.aggapp.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
@@ -17,6 +18,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
@@ -25,10 +27,18 @@ import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsNotDisplayed
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.click
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Density
 import kotlin.math.roundToInt
@@ -38,11 +48,14 @@ import org.junit.Test
 
 class AppWindowLayoutTest {
     @get:Rule val compose = createComposeRule()
-    private val keyboardVisible = mutableStateOf(false)
+    private val keyboardTargetHeight = mutableIntStateOf(0)
     private val keyboardHeight = mutableIntStateOf(0)
     private val navigationHeight = mutableIntStateOf(64)
     private lateinit var padding: MutableState<androidx.compose.ui.unit.Dp>
     private var pixelsPerDp = 1f
+    private var navigationCreations = 0
+    private var navigationDisposals = 0
+    private var navigationClicks = 0
 
     @Test
     fun statusInsetIsAppliedOnceAndGestureRegionUsesPageBackground() {
@@ -71,18 +84,76 @@ class AppWindowLayoutTest {
     }
 
     @Test
-    fun keyboardHidesNavigationAndRestoresItOnlyAfterClosingAnimation() {
+    fun keyboardHidesNavigationForOpenTargetAndRestoresWhenClosingStarts() {
         showLayout()
-        compose.runOnIdle { keyboardVisible.value = true }
-        compose.onNodeWithTag("fixture-navigation").assertDoesNotExist()
+        compose.runOnIdle { keyboardTargetHeight.intValue = 300 }
+        compose.onNodeWithTag("fixture-navigation").assertIsNotDisplayed()
         compose.runOnIdle { assertEquals(0.dp, padding.value); keyboardHeight.intValue = 300 }
         val root = bounds("app-window-layout")
         assertEquals(300 * pixelsPerDp, root.bottom - bounds("fixture-scroll").bottom, 1f)
-        compose.runOnIdle { keyboardVisible.value = false }
-        compose.onNodeWithTag("fixture-navigation").assertDoesNotExist()
+        compose.runOnIdle { keyboardTargetHeight.intValue = 0 }
+        compose.onNodeWithTag("fixture-navigation").assertIsDisplayed()
         compose.runOnIdle { keyboardHeight.intValue = 0 }
         compose.onNodeWithTag("fixture-navigation").assertExists()
         assertAvoidanceMatchesMeasuredNavigation()
+    }
+
+    @Test
+    fun closingTargetRestoresOnNextFrameWithoutWaitingForStaleHeight() {
+        showLayout()
+        compose.runOnIdle { keyboardTargetHeight.intValue = 300; keyboardHeight.intValue = 300 }
+        compose.onNodeWithTag("fixture-navigation").assertIsNotDisplayed()
+        compose.mainClock.autoAdvance = false
+        try {
+            compose.runOnIdle { keyboardTargetHeight.intValue = 0 }
+            compose.mainClock.advanceTimeByFrame()
+            compose.onNodeWithTag("fixture-navigation").assertIsDisplayed()
+            // A delayed OEM progress/end callback must not add a one-second hidden interval.
+            compose.mainClock.advanceTimeBy(1000)
+            compose.onNodeWithTag("fixture-navigation").assertIsDisplayed()
+            compose.runOnIdle {
+                assertEquals(300, keyboardHeight.intValue)
+                assertEquals(1, navigationCreations)
+                assertEquals(0, navigationDisposals)
+            }
+        } finally { compose.mainClock.autoAdvance = true }
+    }
+
+    @Test
+    fun repeatedKeyboardCyclesRetainNavigationAndDisableHiddenInputAndSemantics() {
+        showLayout()
+        val root = bounds("app-window-layout")
+        val location = bounds("fixture-navigation").center - root.topLeft
+        repeat(3) {
+            compose.runOnIdle { keyboardTargetHeight.intValue = 300; keyboardHeight.intValue = 300 }
+            compose.onNodeWithTag("fixture-navigation").assertIsNotDisplayed()
+            compose.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab)).assertCountEquals(0)
+            compose.onNodeWithTag("app-window-layout").performTouchInput { click(location) }
+            compose.runOnIdle {
+                assertEquals(1, navigationCreations)
+                assertEquals(0, navigationDisposals)
+                assertEquals(0, navigationClicks)
+                keyboardTargetHeight.intValue = 0
+                keyboardHeight.intValue = 0
+            }
+            compose.onNodeWithTag("fixture-navigation").assertExists()
+        }
+        compose.onNodeWithTag("fixture-navigation").performTouchInput { click() }
+        compose.runOnIdle { assertEquals(1, navigationCreations); assertEquals(1, navigationClicks) }
+    }
+
+    @Test
+    fun navigationIsMeasuredWhileHiddenAndRestoresWithoutASecondPaddingFrame() {
+        showLayout()
+        compose.runOnIdle { keyboardTargetHeight.intValue = 300; keyboardHeight.intValue = 300 }
+        compose.runOnIdle { navigationHeight.intValue = 96 }
+        compose.mainClock.autoAdvance = false
+        try {
+            compose.runOnIdle { keyboardTargetHeight.intValue = 0; keyboardHeight.intValue = 0 }
+            compose.mainClock.advanceTimeByFrame()
+            assertAvoidanceMatchesMeasuredNavigation()
+            compose.runOnIdle { assertEquals(1, navigationCreations); assertEquals(0, navigationDisposals) }
+        } finally { compose.mainClock.autoAdvance = true }
     }
 
     @Test
@@ -108,7 +179,7 @@ class AppWindowLayoutTest {
                     safeInsets = WindowInsets(0, with(density) { 30.dp.roundToPx() }, 0, 0),
                     navigationInsets = WindowInsets(0, 0, 0, with(density) { navigationInset.dp.roundToPx() }),
                     keyboardInsets = WindowInsets(0, 0, 0, with(density) { keyboardHeight.intValue.dp.roundToPx() }),
-                    keyboardVisible = keyboardVisible.value,
+                    keyboardTargetInsets = WindowInsets(0, 0, 0, with(density) { keyboardTargetHeight.intValue.dp.roundToPx() }),
                     content = { bottomPadding ->
                         androidx.compose.runtime.SideEffect { padding.value = bottomPadding }
                         Column(Modifier.fillMaxSize().testTag("fixture-scroll")
@@ -118,8 +189,13 @@ class AppWindowLayoutTest {
                             Text("最后一项", Modifier.fillMaxWidth().height(48.dp).testTag("fixture-last"))
                         }
                     },
-                    navigation = {
+                    navigation = { _, interactive ->
+                        DisposableEffect(Unit) {
+                            navigationCreations++
+                            onDispose { navigationDisposals++ }
+                        }
                         Box(Modifier.fillMaxWidth().height(navigationHeight.intValue.dp)
+                            .clickable(enabled = interactive, role = Role.Tab) { navigationClicks++ }
                             .background(Color.Blue).testTag("fixture-navigation"))
                     },
                 )

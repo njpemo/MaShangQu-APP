@@ -97,6 +97,7 @@ internal fun LiquidBottomNavigation(
     onRouteSelected: (String) -> Unit,
     backdrop: Backdrop,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     if (items.isEmpty()) return
     val colors = MaterialTheme.colorScheme
@@ -113,6 +114,7 @@ internal fun LiquidBottomNavigation(
     val isPressed = interactionSources.map { it.collectIsPressedAsState().value }.any { it }
     val focusedIndex = interactionSources.map { it.collectIsFocusedAsState().value }.indexOfFirst { it }
     val currentSelectedRoute by rememberUpdatedState(selectedRoute)
+    val currentEnabled by rememberUpdatedState(enabled)
     val currentSelectedPosition by rememberUpdatedState(selectedPosition)
     val currentOnRouteSelected by rememberUpdatedState(onRouteSelected)
     var lastRequestedRoute by remember(selectedRoute) { mutableStateOf<String?>(null) }
@@ -125,7 +127,7 @@ internal fun LiquidBottomNavigation(
     val combinedBackdrop = rememberCombinedBackdrop(backdrop, tabsBackdrop)
 
     fun selectRoute(route: String) {
-        if (route != currentSelectedRoute && route != lastRequestedRoute) {
+        if (currentEnabled && route != currentSelectedRoute && route != lastRequestedRoute) {
             lastRequestedRoute = route
             currentOnRouteSelected(route)
         }
@@ -192,8 +194,8 @@ internal fun LiquidBottomNavigation(
             Modifier
                 .fillMaxWidth()
                 .onSizeChanged { navigationSize = it }
-                .pointerInput(routes, selectedRoute, navigationSize, isRtl) {
-                    if (navigationSize.width <= 0) return@pointerInput
+                .pointerInput(routes, selectedRoute, navigationSize, isRtl, enabled) {
+                    if (!enabled || navigationSize.width <= 0) return@pointerInput
                     val inset = with(density) { 4.dp.toPx() }
                     val slotWidth = (navigationSize.width - 2f * inset) / items.size
                     if (slotWidth <= 0f) return@pointerInput
@@ -266,6 +268,7 @@ internal fun LiquidBottomNavigation(
                                 selected = index == selectedIndex,
                                 interactionSource = interactionSources[index],
                                 indication = null,
+                                enabled = enabled,
                                 role = Role.Tab,
                                 onClick = { selectRoute(item.route) },
                             )
