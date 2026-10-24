@@ -3,7 +3,9 @@ agp = "8.13.0"
 kotlin = "2.2.20"
 ksp = "2.2.20-2.0.2"
 hilt = "2.57.1"
-composeBom = "2025.09.00"
+composeBom = "2025.11.01"
+backdrop = "1.0.1"
+capsule = "2.1.1"
 activityCompose = "1.11.0"
 navigationCompose = "2.9.4"
 lifecycle = "2.9.3"
@@ -27,6 +29,11 @@ compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = 
 compose-ui = { group = "androidx.compose.ui", name = "ui" }
 compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
 compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
+compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
+compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
+androidx-test-runner = { group = "androidx.test", name = "runner", version = "1.6.2" }
+backdrop = { group = "io.github.kyant0", name = "backdrop", version.ref = "backdrop" }
+capsule = { group = "io.github.kyant0", name = "capsule", version.ref = "capsule" }
 compose-material3 = { group = "androidx.compose.material3", name = "material3" }
 compose-material-icons = { group = "androidx.compose.material", name = "material-icons-extended" }
 hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }

@@ -1,0 +1,12 @@
+AndroidLiquidGlass (Backdrop) by Kyant (Kyant0)
+https://github.com/Kyant0/AndroidLiquidGlass/tree/1.0.1
+
+LiquidBottomNavigation.kt and LiquidNavigationHighlight.kt adapt the catalog's
+LiquidBottomTabs, LiquidBottomTab, DampedDragAnimation and InteractiveHighlight
+examples from release 1.0.1, under the Apache License, Version 2.0.
+
+Modifications for MaShangQu: controlled navigation callbacks, cancel-safe
+gestures, a visual-only foreground capture, accessible tabs, RTL, dynamic text
+measurement and Android version fallbacks.
+
+The accompanying AndroidLiquidGlass-LICENSE.txt contains the upstream license.

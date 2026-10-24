@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -63,6 +64,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -97,7 +99,7 @@ fun renderCode128(content: String, width: Int = 1000, height: Int = 300): Bitmap
 
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-fun IdCodeScreen(vm: MainViewModel) {
+fun IdCodeScreen(vm: MainViewModel, bottomContentPadding: Dp = 0.dp) {
     val state by vm.state.collectAsState()
     val platforms = Platform.entries.toList()
 
@@ -121,7 +123,10 @@ fun IdCodeScreen(vm: MainViewModel) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    Scaffold(containerColor = MaterialTheme.colorScheme.background) { pad ->
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+    ) { pad ->
         PullToRefreshBox(
             isRefreshing = state.loading,
             onRefresh = { vm.refreshAll(force = true) },
@@ -130,7 +135,8 @@ fun IdCodeScreen(vm: MainViewModel) {
             Column(
                 Modifier
                     .fillMaxSize()
-                    .verticalScroll(rememberScrollState()),
+                    .verticalScroll(rememberScrollState())
+                    .padding(bottom = bottomContentPadding),
             ) {
                 // ===== 简洁头部（surface 底 + 主色点缀，与底部导航栏同风格）=====
                 Column(
