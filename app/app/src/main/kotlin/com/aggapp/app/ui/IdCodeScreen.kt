@@ -3,7 +3,6 @@ package com.aggapp.app.ui
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -53,12 +52,12 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -102,6 +101,8 @@ fun renderCode128(content: String, width: Int = 1000, height: Int = 300): Bitmap
 fun IdCodeScreen(vm: MainViewModel, bottomContentPadding: Dp = 0.dp) {
     val state by vm.state.collectAsState()
     val platforms = Platform.entries.toList()
+    val imageScope = rememberCoroutineScope()
+    val barcodeCache = remember(imageScope) { Code128BitmapCache(imageScope) }
 
     // 双击全屏显示当前平台身份码（单击全屏任意处退出）
     var fullscreen by remember { mutableStateOf(false) }
@@ -274,22 +275,10 @@ fun IdCodeScreen(vm: MainViewModel, bottomContentPadding: Dp = 0.dp) {
                                 }
                                 Spacer(Modifier.height(16.dp))
 
-                                val bmp = renderCode128(code.content)
-                                if (bmp != null) {
-                                    Image(
-                                        bitmap = bmp.asImageBitmap(),
-                                        contentDescription = "身份码条形码",
-                                        modifier = Modifier.fillMaxWidth(),
-                                    )
-                                } else {
-                                    Box(
-                                        Modifier
-                                            .fillMaxWidth()
-                                            .height(120.dp)
-                                            .background(Color.LightGray, RoundedCornerShape(12.dp)),
-                                        contentAlignment = Alignment.Center,
-                                    ) { Text("条码渲染失败") }
-                                }
+                                Code128Image(
+                                    code.content, barcodeCache, "身份码条形码",
+                                    Modifier.fillMaxWidth().aspectRatio(10f / 3f),
+                                )
                                 Spacer(Modifier.height(16.dp))
                                 // 码号文字单独显示（对齐 H5 原版 displayValue:false）
                                 Text(
@@ -410,17 +399,10 @@ fun IdCodeScreen(vm: MainViewModel, bottomContentPadding: Dp = 0.dp) {
                             fontWeight = FontWeight.Bold,
                         )
                         if (code != null) {
-                            renderCode128(code.content)?.let {
-                                Image(
-                                    bitmap = it.asImageBitmap(),
-                                    contentDescription = "${p.label}身份码条形码",
-                                    contentScale = ContentScale.Fit,
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 24.dp),
-                                )
-                            }
+                            Code128Image(
+                                code.content, barcodeCache, "${p.label}身份码条形码",
+                                Modifier.weight(1f).fillMaxWidth().padding(horizontal = 24.dp),
+                            )
                             Text(
                                 code.content,
                                 fontSize = 13.sp,
@@ -468,17 +450,11 @@ fun IdCodeScreen(vm: MainViewModel, bottomContentPadding: Dp = 0.dp) {
                             fontWeight = FontWeight.Bold,
                         )
                         Spacer(Modifier.height(16.dp))
-                        renderCode128(code.content, width = 1400, height = 420)?.let {
-                            Image(
-                                bitmap = it.asImageBitmap(),
-                                contentDescription = "身份码条形码（全屏）",
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(24.dp)
-                                    .aspectRatio(10f / 3f),
-                                contentScale = ContentScale.FillWidth,
-                            )
-                        }
+                        Code128Image(
+                            code.content, barcodeCache, "身份码条形码（全屏）",
+                            Modifier.fillMaxWidth().padding(24.dp).aspectRatio(10f / 3f),
+                            width = 1400, height = 420, contentScale = ContentScale.FillWidth,
+                        )
                         Spacer(Modifier.height(20.dp))
                         Text(
                             code.content,
