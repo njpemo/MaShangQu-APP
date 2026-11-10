@@ -1,0 +1,30 @@
+# 码上取 v1.0.10 手写 Baseline Profile（AGP 自动编译进 APK，安装即生效）
+# 范围：启动热路径（MainActivity + 三 Tab 首屏 Composable + 条码渲染器）。
+# CL 规则（L 前缀）= 类预加载；HSPL 规则 = 方法预编译（H hot/S startup/P process/L loom-friendly）。
+# 通配语法与 AAR 内置 profile 一致：类段 * 单段通配，方法段 **(**)** 全通配。
+
+# ---- 入口 Activity 与 Hilt 注入 ----
+Lcom/aggapp/app/ui/MainActivity;
+HSPLcom/aggapp/app/ui/MainActivity;->**(**)**
+Lcom/aggapp/app/ui/MainViewModel;
+HSPLcom/aggapp/app/ui/MainViewModel;->**(**)**
+Lcom/aggapp/app/ui/MainActivityKt;
+HSPLcom/aggapp/app/ui/MainActivityKt;->**(**)**
+
+# ---- 三个 Tab 首屏 Composable（默认落地页为快递页） ----
+Lcom/aggapp/app/ui/ExpressScreenKt;
+HSPLcom/aggapp/app/ui/ExpressScreenKt;->**(**)**
+Lcom/aggapp/app/ui/IdCodeScreenKt;
+HSPLcom/aggapp/app/ui/IdCodeScreenKt;->**(**)**
+Lcom/aggapp/app/ui/MineScreenKt;
+HSPLcom/aggapp/app/ui/MineScreenKt;->**(**)**
+Lcom/aggapp/app/ui/ExpressViewModel;
+HSPLcom/aggapp/app/ui/ExpressViewModel;->**(**)**
+
+# ---- 条码渲染热路径（批量 setPixels + LruCache，首屏身份码绘制） ----
+Lcom/aggapp/app/ui/BarcodeRenderer;
+HSPLcom/aggapp/app/ui/BarcodeRenderer;->**(**)**
+
+# ---- 主题（首帧组合必经） ----
+Lcom/aggapp/app/ui/theme/Brand;
+HSPLcom/aggapp/app/ui/theme/Brand;->**(**)**

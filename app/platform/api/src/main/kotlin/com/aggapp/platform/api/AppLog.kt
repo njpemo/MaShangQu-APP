@@ -31,6 +31,8 @@ object AppLog {
 
     fun w(tag: String, msg: String, err: Throwable? = null) = record("W", tag, msg, err)
 
+    fun i(tag: String, msg: String) = record("I", tag, msg, null)
+
     fun e(tag: String, msg: String, err: Throwable? = null) = record("E", tag, msg, err)
 
     @Synchronized

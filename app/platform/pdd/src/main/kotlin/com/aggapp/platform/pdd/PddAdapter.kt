@@ -2,18 +2,22 @@ package com.aggapp.platform.pdd
 
 import com.aggapp.core.model.CodeType
 import com.aggapp.core.model.Credential
+import com.aggapp.core.model.ExpressDetail
 import com.aggapp.core.model.ExpressItem
 import com.aggapp.core.model.ExpressStatus
 import com.aggapp.core.model.IdentityCode
 import com.aggapp.core.model.Platform
 import com.aggapp.core.model.PlatformError
 import com.aggapp.core.model.PickupCode
+import com.aggapp.core.model.TrackPoint
 import com.aggapp.platform.api.AppLog
 import com.aggapp.platform.api.CapturedRequest
 import com.aggapp.platform.api.LoginMode
 import com.aggapp.platform.api.PlatformAdapter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -151,7 +155,7 @@ class PddAdapter @Inject constructor(
      * 不能按非 2xx 直接抛 NetworkError）。anti_content 双份上送：请求头 anti-content +
      * body.anti_content（Node 实测均可过，双份与浏览器行为一致）。
      */
-    private suspend fun postLogin(api: String, phone: String, code: String?): JsonObject {
+    private suspend fun postLogin(api: String, phone: String, code: String?): JsonObject = requestGate.withLock {
         val ac = try {
             antiContent.generate()
         } catch (e: Exception) {
@@ -193,7 +197,7 @@ class PddAdapter @Inject constructor(
         if (errCode != null && errCode != "0") {
             throw PlatformError.ParseFailed(platform, "${env.str("error_msg")} ($errCode)")
         }
-        return env
+        env
     }
 
     /** WEBVIEW 短信登录页（手机号+验证码，桌面/移动 UA 均可） */
@@ -260,12 +264,14 @@ class PddAdapter @Inject constructor(
                 val list = env.obj("result")?.arr("track_info_list").orEmpty()
                 for (el in list) {
                     val t = el as? JsonObject ?: continue
-                    val trackingNo = t.str("tracking_number") ?: continue
+                    // 待发货(100)单 tracking_number 为空串，跳过（无物流轨迹）
+                    val trackingNo = t.str("tracking_number")?.takeIf { it.isNotBlank() } ?: continue
                     if (out.any { it.trackingNo == trackingNo }) continue
                     val status = when (t.optLong("status_type")) {
+                        200L -> ExpressStatus.IN_TRANSIT // 运输中
                         400L -> ExpressStatus.WAIT_PICKUP
                         500L -> ExpressStatus.PICKED
-                        else -> ExpressStatus.UNKNOWN // 200 运输中/其他
+                        else -> ExpressStatus.UNKNOWN
                     }
                     out += ExpressItem(
                         id = trackingNo,
@@ -275,6 +281,7 @@ class PddAdapter @Inject constructor(
                         trackingNo = trackingNo,
                         pickupCode = t.str("pick_code")?.removePrefix(PICK_CODE_PREFIX)?.trim()?.takeIf { it.isNotBlank() },
                         summary = t.str("goods_name") ?: t.str("shipping_name"),
+                        imageUrl = t.str("pic_url"),
                         status = status,
                         arrivedAt = null, // 列表无入库时间
                         fetchDeadline = null,
@@ -313,6 +320,7 @@ class PddAdapter @Inject constructor(
                             // 驿站在架实况优先：运输中的单若已在架则视为待取
                             status = if (exist.status != ExpressStatus.PICKED) ExpressStatus.WAIT_PICKUP else exist.status,
                             summary = exist.summary ?: t.str("shipping_name"),
+                            imageUrl = exist.imageUrl ?: t.str("pic_url"),
                         )
                         continue
                     }
@@ -324,6 +332,7 @@ class PddAdapter @Inject constructor(
                         trackingNo = trackingNo,
                         pickupCode = stCode,
                         summary = t.str("shipping_name"),
+                        imageUrl = t.str("pic_url"),
                         status = ExpressStatus.WAIT_PICKUP,
                         arrivedAt = t.str("operation_time")?.parseTime(),
                         fetchDeadline = null,
@@ -388,11 +397,106 @@ class PddAdapter @Inject constructor(
         return null
     }
 
-    /** 从 track_desc 提取驿站/代收点名：「已到达[妈妈驿站]xxx」「已投递...在【xxx】」「已派送至【xxx】」 */
+    /**
+     * 快递详情（v1.0.10 弹窗，pdd.md §6.2/§6.3）：
+     * ① tracking/search 识别快递公司（shipping_id/shipping_name）；
+     * ② dsd/trackbox/shipping/track 查完整轨迹与在站状态（order_sn/source_type 取列表项原始
+     *    JSON，缺失传空兜底；参数不全报 1000 → 轨迹降级为空，仅返回识别到的商品信息）。
+     */
+    override suspend fun fetchDetail(cred: Credential, item: ExpressItem): ExpressDetail? {
+        val no = item.trackingNo?.takeIf { it.isNotBlank() } ?: return null
+        val raw = item.raw?.let { r -> runCatching { json.parseToJsonElement(r).jsonObject }.getOrNull() }
+        // 快递公司识别：列表项 raw 直出的 shipping_name 优先（零请求），缺失才调 tracking/search
+        var shippingId = raw?.str("shipping_id")
+        var shippingName = raw?.str("shipping_name")
+        val picUrl = raw?.str("pic_url") ?: item.imageUrl
+        // 驿站源包裹（package_out_list）无 order_sn/source_type 字段，shipping/track 会报 1000；
+        // tracking/search 响应的 jump_url 里有 order_sn（2026-10-28 实测），从那里补
+        var orderSn = raw?.str("order_sn") ?: ""
+        var sourceType = raw?.str("source_type") ?: "6" // 快递助手来源单均为 6，实测驿站单传 6 也通过
+        val needSearch = shippingId.isNullOrBlank() || shippingName.isNullOrBlank() || orderSn.isBlank()
+        if (needSearch) {
+            runCatching {
+                val r = postApi(cred, API_TRACKING_SEARCH, """{"tracking_number":"$no"}""").obj("result")
+                shippingId = shippingId ?: r?.str("shipping_id")
+                shippingName = shippingName ?: r?.str("shipping_name")
+                if (orderSn.isBlank()) {
+                    val jump = r?.str("jump_url").orEmpty()
+                    orderSn = Regex("order_sn=([^&]+)").find(jump)?.groupValues?.let { it[1] }?.let {
+                        java.net.URLDecoder.decode(it, "UTF-8")
+                    }.orEmpty()
+                }
+            }
+        }
+        var shippingStatus: Long? = null
+        val tracks = runCatching {
+            // ① 主站 GET 全量轨迹（快递公司视角：揽收→转运→派送→签收，10+ 条；
+            //    2026-10-28 实测仅 query 四参数，缺 shipping_id/source_type 报 9990）
+            var env = if (System.currentTimeMillis() < mainTrackCooldownUntil) null else getMainSiteTrack(cred, no, shippingId, sourceType)
+            // 54001 限频：进入冷却期，冷却期内跳过主站直接用驿站域兜底（防连续请求雪上加霜）
+            if (env?.str("error_code") == "54001") {
+                mainTrackCooldownUntil = System.currentTimeMillis() + MAIN_TRACK_COOLDOWN_MS
+                env = null
+            }
+            var shipping = env?.obj("shipping")
+            // ② 降级：驿站域 POST（驿站视角，仅商家发货链路约 5 条，无快递轨迹）
+            if (shipping == null) {
+                val body = JsonObject(buildMap {
+                    put("order_sn", JsonPrimitive(orderSn))
+                    put("shipping_id", JsonPrimitive(shippingId ?: ""))
+                    put("shipping_name", JsonPrimitive(shippingName ?: ""))
+                    put("tracking_number", JsonPrimitive(no))
+                    put("source_type", JsonPrimitive(sourceType))
+                    put("entry_source", JsonPrimitive(9))
+                    put("partial_shipment_period", JsonPrimitive(""))
+                })
+                shipping = postApi(cred, API_SHIPPING_TRACK, body.toString()).obj("shipping")
+            }
+            shippingStatus = shipping?.optLong("shipping_status")
+            shippingName = shippingName ?: shipping?.str("shipping_name")
+            // 实测 traces 结构（2026-10-28）：info=文案 / time=时间 / statusTag=状态标签；
+            // track_events 是订阅提醒等嵌套干扰项，不参与轨迹
+            shipping?.arr("traces")?.mapNotNull { el ->
+                val t = el as? JsonObject ?: return@mapNotNull null
+                TrackPoint(
+                    // opName 是时间线标题（UI 单行截断）：放短状态标签；长文案 info 放 description（不限行）
+                    opName = t.str("statusTag") ?: t.str("desc") ?: t.str("op_name"),
+                    opTime = t.str("time") ?: t.str("op_time") ?: t.str("scan_time"),
+                    description = t.str("info"),
+                )
+            }.orEmpty()
+        }.getOrNull().orEmpty()
+        if (tracks.isEmpty() && picUrl == null && shippingName.isNullOrBlank()) return null
+        return ExpressDetail(
+            trackingNo = no,
+            // 列表直出的状态文案最准（assistant：待发货/运输中/已签收）；接口状态码为辅
+            // （实测 shipping/track 新体系 20=运输中，旧文档 200/400/500 保留兼容）
+            statusDesc = raw?.str("status_type_desc")
+                ?: when (shippingStatus) {
+                    20L, 200L -> "运输中"
+                    400L, 40L -> "待取件"
+                    500L, 50L -> "已签收"
+                    else -> null
+                },
+            courier = shippingName,
+            goodsName = item.summary,
+            goodsImage = picUrl,
+            tracks = tracks,
+        )
+    }
+
+    /**
+     * 从 track_desc 提取驿站/代收点名：「已到达[妈妈驿站]xxx」「已投递...在【xxx】」「已派送至【xxx】」。
+     * 仅在描述确实是"投递到站"语境时提取，避免把中转/揽收描述里的【xxx】（如快递网点名）
+     * 误当成驿站名 —— 那是快递页驿站名显示错误的另一来源。
+     */
     private fun String?.extractStation(): String? {
         val s = this ?: return null
         STATION_ARRIVE_REGEX.find(s)?.let { return (it.groupValues[1] + it.groupValues[2]).trim() }
-        STATION_BRACKET_REGEX.find(s)?.let { return it.groupValues[1].trim() }
+        // 只有投递/派送语境才采信【】内容；「已揽收【xx营业部】」等运输语境不提取
+        if (STATION_DELIVERY_CONTEXT.containsMatchIn(s)) {
+            STATION_BRACKET_REGEX.find(s)?.let { return it.groupValues[1].trim() }
+        }
         return null
     }
 
@@ -407,8 +511,11 @@ class PddAdapter @Inject constructor(
      * 业务请求（pdd.md §2）：POST https://mobile.yangkeduo.com/proxy/api/<api>，
      * 必需头仅 anti-content（每次新生成）+ accesstoken（§1.4：Origin/Referer/UA 非必需）。
      * error_code 40001 → NeedRelogin；其余非 0 → ParseFailed。
+     * v1.0.10：全接口走全局闸门串行——启动时 MainViewModel checkAlive 与 ExpressViewModel
+     * 列表拉取并发打接口会触发 54001（查询频率太快），且 anti-content 的 WebView 生成
+     * 不宜并发；串行后请求间隔为真实 HTTP 往返，实测安全。
      */
-    private suspend fun postApi(cred: Credential, api: String, body: String): JsonObject {
+    private suspend fun postApi(cred: Credential, api: String, body: String): JsonObject = requestGate.withLock {
         val ac = try {
             antiContent.generate()
         } catch (e: Exception) {
@@ -442,8 +549,57 @@ class PddAdapter @Inject constructor(
         if (errCode != null && errCode != "0") {
             throw PlatformError.ParseFailed(platform, "${env.str("error_msg")} ($errCode)")
         }
-        return env
+        env
     }
+
+    /** 全局请求闸门（本 @Singleton 全实例共享）：登录/业务请求统一串行，防并发限频 */
+    private val requestGate = Mutex()
+
+    /** 主站轨迹接口 54001 限频冷却截止（ms 时间戳）：冷却期内 fetchDetail 跳过主站直接降级 */
+    @Volatile
+    private var mainTrackCooldownUntil: Long = 0L
+
+    /** 54001 冷却时长：90s 后自动重试主站（实测限频为账号级短窗口） */
+    private val MAIN_TRACK_COOLDOWN_MS = 90_000L
+
+    /**
+     * 主站 GET 轨迹（add-package 页 trackDetail 同款，2026-10-28 实测打通）：
+     * GET $PROXY_BASE/api/express/shipping/track?tracking_number=&entry_source=9&shipping_id=&source_type=
+     * 返回快递公司全量轨迹（揽收→转运→派送→签收 10+ 条）；缺 shipping_id/source_type 报 9990。
+     * 与驿站域 POST shipping/track（仅商家发货链路约 5 条）互补；任何失败返回 null 由调用方降级。
+     */
+    private suspend fun getMainSiteTrack(cred: Credential, no: String, shippingId: String?, sourceType: String?): JsonObject? =
+        requestGate.withLock {
+            val ac = try {
+                antiContent.generate()
+            } catch (e: Exception) {
+                null
+            } ?: return@withLock null
+            val qs = buildString {
+                append("?tracking_number=").append(java.net.URLEncoder.encode(no, "UTF-8"))
+                append("&entry_source=9")
+                if (!shippingId.isNullOrBlank()) append("&shipping_id=").append(java.net.URLEncoder.encode(shippingId, "UTF-8"))
+                if (!sourceType.isNullOrBlank()) append("&source_type=").append(java.net.URLEncoder.encode(sourceType, "UTF-8"))
+            }
+            val request = Request.Builder()
+                .url("$PROXY_BASE/api/express/shipping/track$qs")
+                .header("anti-content", ac)
+                .header("accesstoken", cred.token)
+                .get()
+                .build()
+            try {
+                withContext(Dispatchers.IO) {
+                    http.newCall(request).execute().use { resp ->
+                        if (!resp.isSuccessful) return@use null
+                        resp.body?.string().orEmpty()
+                    }
+                }?.let { text ->
+                    runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull()
+                }
+            } catch (e: IOException) {
+                null
+            }
+        }
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -504,11 +660,20 @@ class PddAdapter @Inject constructor(
         /** 快递助手列表（主站按手机号聚合全驿站快递，2026-09-29 实测：妈妈驿站 YT 单出取件码） */
         const val API_ASSISTANT_LIST = "/api/express_trackbox/list"
 
+        /** 快递公司识别（pdd.md §6.2：tracking_number → shipping_id/shipping_name/pic_url） */
+        const val API_TRACKING_SEARCH = "/api/express_trackbox/express/tracking/search"
+
+        /** 单件轨迹（pdd.md §6.3，=track 页 trackDetail；参数不全报 1000 非法参数） */
+        const val API_SHIPPING_TRACK = "/api/express/dsd/trackbox/shipping/track"
+
         /** track_desc 驿站名提取：「已投递...在【xxx】」/「已派送至【xxx】」 */
         val STATION_BRACKET_REGEX = Regex("【([^】]+)】")
 
         /** track_desc 驿站名提取：「已到达[妈妈驿站]珠海科技学院快递中心」 */
         val STATION_ARRIVE_REGEX = Regex("到达\\[([^\\]]+)\\]([^，。\\s]{2,25})")
+
+        /** track_desc 投递到站语境（揽收/中转/运输语境的【网点】不作为驿站名） */
+        val STATION_DELIVERY_CONTEXT = Regex("投递|派送|代收|驿站|放至|存放")
 
         /** 身份码（实测：entry_source:"WX" → wx 前缀码） */
         const val API_IDENTIFICATION_CODE = "/api/express_trackbox/generate_identification_code"

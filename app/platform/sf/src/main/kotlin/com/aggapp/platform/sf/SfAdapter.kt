@@ -2,12 +2,14 @@ package com.aggapp.platform.sf
 
 import com.aggapp.core.model.CodeType
 import com.aggapp.core.model.Credential
+import com.aggapp.core.model.ExpressDetail
 import com.aggapp.core.model.ExpressItem
 import com.aggapp.core.model.ExpressStatus
 import com.aggapp.core.model.IdentityCode
 import com.aggapp.core.model.Platform
 import com.aggapp.core.model.PlatformError
 import com.aggapp.core.model.PickupCode
+import com.aggapp.core.model.TrackPoint
 import com.aggapp.platform.api.CapturedRequest
 import com.aggapp.platform.api.LoginMode
 import com.aggapp.platform.api.PlatformAdapter
@@ -390,6 +392,67 @@ class SfAdapter @Inject constructor() : PlatformAdapter {
         return null
     }
 
+    /**
+     * 快递详情（v1.0.10 弹窗，仅旧驿收发 YJY 凭据）：
+     * GET /e-order/order/mini/route/detail?billCode=&expressBrandCode=（线 A 抓包记录，
+     * 响应形态未文档化）。k/v 加密信封由 call() 统一解密；轨迹数组位置不定 →
+     * 在 data 内递归寻找首个「轨迹形」数组。任何失败降级返回 null（UI 回退卡片字段）。
+     */
+    override suspend fun fetchDetail(cred: Credential, item: ExpressItem): ExpressDetail? {
+        if (cred.extra["mimp"] == "1") return null // 校园链路无轨迹端点（§5.3）
+        val billCode = item.trackingNo?.takeIf { it.isNotBlank() } ?: return null
+        val env = try {
+            call(
+                cred.token,
+                "GET",
+                PATH_ROUTE_DETAIL,
+                query = mapOf(
+                    "billCode" to billCode,
+                    "expressBrandCode" to EXPRESS_BRAND_CODE,
+                ),
+            )
+        } catch (_: Exception) {
+            return null
+        }
+        val data = try {
+            requireData(env)
+        } catch (_: Exception) {
+            return null
+        }
+        val nodes = findTracks(data)
+        if (nodes.isEmpty()) return null
+        return ExpressDetail(
+            trackingNo = billCode,
+            courier = "顺丰速运",
+            goodsName = item.summary,
+            tracks = nodes.map { o ->
+                TrackPoint(
+                    opName = o.optStr("opName") ?: o.optStr("status"),
+                    opTime = o.optStr("acceptTime") ?: o.optStr("opTime") ?: o.optStr("time"),
+                    description = o.optStr("remark") ?: o.optStr("opDesc")
+                        ?: o.optStr("description") ?: o.optStr("content"),
+                )
+            },
+        )
+    }
+
+    /** 在未文档化响应内递归寻找首个「轨迹形」数组（元素同时命中时间与描述候选键） */
+    private fun findTracks(el: JsonElement?): List<JsonObject> = when (el) {
+        is JsonArray -> {
+            val objs = el.mapNotNull { it as? JsonObject }
+            if (objs.any { o ->
+                    SF_TIME_KEYS.any { o.optStr(it) != null } && SF_DESC_KEYS.any { o.optStr(it) != null }
+                }
+            ) {
+                objs
+            } else {
+                el.firstNotNullOfOrNull { findTracks(it) }.orEmpty()
+            }
+        }
+        is JsonObject -> el.values.firstNotNullOfOrNull { findTracks(it) }.orEmpty()
+        else -> emptyList()
+    }
+
     // ============ 网关请求核心（sf.md §9.1 签名 + §1.3 AES 解密） ============
 
     /**
@@ -503,6 +566,18 @@ class SfAdapter @Inject constructor() : PlatformAdapter {
         private const val PATH_SEARCH_WAYBILL = "/e-mini/mini/searchWaybill"
         private const val PATH_GET_WAYBILL_INFO = "/e-mini/warehouse/getWaybillInfo"
         private const val PATH_GET_WAYBILL_PICKUP_CODE_V2 = "/e-mini/warehouse/v2/getWaybillPickupCode"
+
+        /** v1.0.10 快递详情轨迹（线 A 抓包：响应形态未文档化，防御式解析） */
+        private const val PATH_ROUTE_DETAIL = "/e-order/order/mini/route/detail"
+
+        /** route/detail 品牌码（顺丰自有单固定 SF） */
+        private const val EXPRESS_BRAND_CODE = "SF"
+
+        /** 轨迹节点时间候选键（响应未文档化，多键兜底） */
+        private val SF_TIME_KEYS = arrayOf("acceptTime", "opTime", "time", "scanTime", "operTime")
+
+        /** 轨迹节点描述候选键（响应未文档化，多键兜底） */
+        private val SF_DESC_KEYS = arrayOf("remark", "opDesc", "description", "content", "desc", "opName")
 
         private const val PAGE_SIZE = 10
         private const val PICKUP_PROBE_PAGES = 5        // 取件码查找最多翻 5 页（50 条）

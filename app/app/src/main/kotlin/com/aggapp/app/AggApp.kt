@@ -17,13 +17,18 @@ class AggApp : Application() {
             }
         }
         // 落盘保底：部分机型 logd 间歇丢日志，AppLog 全量追加到 filesDir/aggapp.log
-        // （debug 包可用 `adb exec-out run-as com.aggapp.app cat files/aggapp.log` 拉取）
+        // 轮转策略：当前文件超 2MB → 重命名为 aggapp.log.1（旧的 .1 被覆盖），保留上一代历史；
+        // 导出时（MineViewModel）把 .log 与 .log.1 按时间序合并，覆盖自安装以来的完整日志。
         val logFile = java.io.File(getFilesDir(), "aggapp.log")
+        val logOld = java.io.File(getFilesDir(), "aggapp.log.1")
         val logIo = java.util.concurrent.Executors.newSingleThreadExecutor()
         AppLog.fileSink = { line ->
             logIo.execute {
                 try {
-                    if (logFile.length() > 1_000_000) logFile.delete() // 超 1MB 重建，防无限增长
+                    if (logFile.length() > 2_000_000) {
+                        logOld.delete()
+                        logFile.renameTo(logOld)
+                    }
                     java.io.FileWriter(logFile, true).use { it.append(line).append('\n') }
                 } catch (_: java.io.IOException) {
                 }

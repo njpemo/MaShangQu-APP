@@ -15,14 +15,21 @@ android {
         minSdk = 26
         targetSdk = 34
         // 每次构建自动递增（epoch 分钟），确保 adb install -r 同名包也能命中更新
-        versionCode = 9
-        versionName = "1.0.8"
+        versionCode = 12
+        versionName = "1.0.10"
     }
     buildToolsVersion = "34.0.0"
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // v1.0.10：开启 R8 混合优化（压缩/混淆/优化）+ 资源收缩，
+            // 启动/首帧由手写 Baseline Profile（src/main/baseline-prof.txt）加速
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
             // 蒲公英分发：用 debug 签名保证可安装（与已分发版本签名一致）
             signingConfig = signingConfigs.getByName("debug")
         }
@@ -60,6 +67,7 @@ dependencies {
     implementation(project(":platform:ryll"))
 
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.profileinstaller) // Baseline Profile 安装器（v1.0.10 启动优化）
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.lifecycle.runtime)

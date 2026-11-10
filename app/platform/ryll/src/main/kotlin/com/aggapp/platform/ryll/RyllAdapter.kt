@@ -2,12 +2,14 @@ package com.aggapp.platform.ryll
 
 import com.aggapp.core.model.CodeType
 import com.aggapp.core.model.Credential
+import com.aggapp.core.model.ExpressDetail
 import com.aggapp.core.model.ExpressItem
 import com.aggapp.core.model.ExpressStatus
 import com.aggapp.core.model.IdentityCode
 import com.aggapp.core.model.Platform
 import com.aggapp.core.model.PlatformError
 import com.aggapp.core.model.PickupCode
+import com.aggapp.core.model.TrackPoint
 import com.aggapp.platform.api.CapturedRequest
 import com.aggapp.platform.api.LoginMode
 import com.aggapp.platform.api.PlatformAdapter
@@ -221,6 +223,34 @@ class RyllAdapter @Inject constructor(
     /** 查件详情（orderDetailByWayBillNo 实测打通，visitor 单也可查；null=查无此单；带 token 以复用 mobileCheck 验证态） */
     suspend fun queryOrderDetail(trackingNo: String, token: String? = null): RyllOrderDetail? =
         client.queryOrderDetail(trackingNo.trim().uppercase(), token)
+
+    /**
+     * 快递详情（v1.0.10 弹窗）：复用查件详情 orderDetailByWayBillNo（已实测打通），
+     * 轨迹节点 description 拼网点名；收寄人与起讫城市取详情基础段。
+     */
+    override suspend fun fetchDetail(cred: Credential, item: ExpressItem): ExpressDetail? {
+        val no = item.trackingNo?.takeIf { it.isNotBlank() } ?: return null
+        val d = runCatching { client.queryOrderDetail(no.trim().uppercase(), cred.token) }.getOrNull()
+            ?: return null
+        return ExpressDetail(
+            trackingNo = d.mailNo,
+            statusDesc = d.statusName.takeIf { it.isNotBlank() },
+            courier = "圆通速递", // 如意邻里（妈妈驿站）均为圆通妈妈驿站体系
+            goodsName = item.summary,
+            tracks = d.tracks.map { t ->
+                TrackPoint(
+                    opName = t.opName,
+                    opTime = t.opTime,
+                    description = listOfNotNull(t.description, t.orgName)
+                        .joinToString(" · ")
+                        .ifBlank { null },
+                )
+            },
+            fromTo = listOfNotNull(d.fromCity, d.toCity).joinToString(" → ").ifBlank { null },
+            sender = d.senderName,
+            receiver = d.receiverName,
+        )
+    }
 
     override suspend fun fetchPickupCode(cred: Credential, expressId: String): PickupCode? {
         // ① 列表内直接取（station 网关未打通时为空，不阻断）

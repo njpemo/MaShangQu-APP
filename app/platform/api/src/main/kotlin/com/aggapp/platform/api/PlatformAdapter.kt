@@ -3,6 +3,7 @@ package com.aggapp.platform.api
 import com.aggapp.core.model.Credential
 import com.aggapp.core.model.IdentityCode
 import com.aggapp.core.model.Platform
+import com.aggapp.core.model.ExpressDetail
 import com.aggapp.core.model.ExpressItem
 import com.aggapp.core.model.PickupCode
 
@@ -60,4 +61,10 @@ interface PlatformAdapter {
 
     /** 单件快递取件码查询；查不到返回 null */
     suspend fun fetchPickupCode(cred: Credential, expressId: String): PickupCode?
+
+    /**
+     * 快递详情懒加载（v1.0.10 详情弹窗）：物流轨迹 + 商品信息 + 收寄信息。
+     * 平台不支持或查询失败返回 null，UI 降级展示卡片既有字段。
+     */
+    suspend fun fetchDetail(cred: Credential, item: ExpressItem): ExpressDetail? = null
 }

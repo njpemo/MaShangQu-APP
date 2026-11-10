@@ -78,33 +78,23 @@ class MineViewModel @Inject constructor(
     private var sfPhone: String = ""
 
     init {
-        session.restore()
+        // 持续消费 SessionRepository 的共享登录态（凭据恢复已移至 SessionRepository 构造）
+        viewModelScope.launch {
+            session.loginStates.collect { states ->
+                if (states.isNotEmpty()) {
+                    _state.value = _state.value.copy(loginStates = states)
+                }
+            }
+        }
         refreshLoginStates()
     }
 
-    fun refreshLoginStates() {
-        viewModelScope.launch {
-            val creds = session.credentials.value
-            val states = Platform.entries.associateWith { p ->
-                val cred = creds[p]
-                if (cred == null) {
-                    PlatformLoginState(p, loggedIn = false)
-                } else {
-                    val alive = try {
-                        adapters.getValue(p).checkAlive(cred)
-                    } catch (e: Exception) {
-                        false
-                    }
-                    PlatformLoginState(
-                        p,
-                        loggedIn = alive,
-                        needRelogin = !alive,
-                        lastCheckAt = System.currentTimeMillis(),
-                    )
-                }
-            }
-            _state.value = _state.value.copy(loginStates = states)
-        }
+    /**
+     * 登录态总览：触发 SessionRepository.verifyAll（force 忽略 10 分钟节流），
+     * 结果经 init 中的 collect 流回 UI。
+     */
+    fun refreshLoginStates(force: Boolean = false) {
+        session.verifyAll(adapters, force = force)
     }
 
     // ---------- WebView 短信登录（拼多多，去 YYB） ----------
@@ -493,6 +483,7 @@ class MineViewModel @Inject constructor(
         val header = adapter.loginCookieHeader
         val cookies = header.split("; ").filter { it.contains("=") }
             .map { "https://www.taobao.com/" to "$it; Domain=.taobao.com; Path=/" }
+        AppLog.i("AggApp", "taobao risk check: open webview url=$url presetCookieKeys=${cookies.joinToString(",") { it.second.substringBefore("=") }}")
         _state.value = _state.value.copy(busy = false, tbAccounts = emptyList(), tbRiskUrl = url, tbWebviewCookies = cookies)
     }
 
@@ -506,6 +497,7 @@ class MineViewModel @Inject constructor(
                 val adapter = adapters.getValue(Platform.TAOBAO) as com.aggapp.platform.taobao.TaobaoAdapter
                 val cred = adapter.completeRiskCheck(webviewCookieHeader)
                 session.upsert(cred)
+                AppLog.i("AggApp", "taobao risk check: completed ok unb=${cred.extra["unb"]} cookieLen=${cred.token.length}")
                 _state.value = _state.value.copy(
                     busy = false, tbRiskUrl = null, tbWebviewCookies = emptyList(), message = "淘宝登录成功",
                 )
@@ -522,6 +514,7 @@ class MineViewModel @Inject constructor(
 
     /** 关闭风控 WebView 弹窗（放弃本次登录） */
     fun tbDismissRiskCheck() {
+        AppLog.w("AggApp", "taobao risk check: dismissed by user before finishing")
         _state.value = _state.value.copy(tbRiskUrl = null, tbWebviewCookies = emptyList(), message = "已取消，可重新发送验证码")
     }
 
@@ -887,15 +880,17 @@ class MineViewModel @Inject constructor(
         appendLine(AppLog.dump())
 
         appendLine()
-        appendLine("===== 4. aggapp.log 落盘（全量，超 2MB 截尾保留最新） =====")
-        val logFile = java.io.File(appContext.filesDir, "aggapp.log")
-        if (logFile.exists()) {
-            val bytes = logFile.readBytes()
-            val text = String(bytes, Charsets.UTF_8)
-            appendLine(if (text.length > 2_000_000) text.takeLast(2_000_000) else text)
-        } else {
-            appendLine("（aggapp.log 不存在）")
+        appendLine("===== 4. aggapp.log 落盘（全量：当前 .log + 上一代 .log.1 按时间序合并，覆盖自安装以来日志） =====")
+        val cur = java.io.File(appContext.filesDir, "aggapp.log")
+        val old = java.io.File(appContext.filesDir, "aggapp.log.1")
+        // 先旧后新：.log.1 是上一代（更早），.log 是当前
+        for ((label, f) in listOf("（上一代 aggapp.log.1）" to old, "（当前 aggapp.log）" to cur)) {
+            if (f.exists()) {
+                appendLine("----- $label -----")
+                appendLine(f.readText(Charsets.UTF_8))
+            }
         }
+        if (!cur.exists() && !old.exists()) appendLine("（aggapp.log 不存在）")
     }
 
     fun consumeMessage() {

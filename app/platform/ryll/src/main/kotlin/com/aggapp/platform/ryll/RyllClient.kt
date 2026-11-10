@@ -199,6 +199,25 @@ internal class RyllClient(private val http: OkHttpClient) {
                 )
             }
         }
+        // 驿站名多候选：detail 段站点对象（stationName/siteName/pointName/网点名）→
+        // 轨迹里"到达 [xxx驿站]" 类 description 提取（防御式，README §8）
+        val recieve = (env["recieveOrderDetailResponse"] as? JsonObject)?.get("value") as? JsonObject
+        val ocDetail = env["ocOrderDetailResponse"] as? JsonObject
+        val stationFromDetail = listOf(recieve, ocDetail, base).firstNotNullOfOrNull { src ->
+            src?.let { s ->
+                listOf("stationName", "siteName", "pointName", "networkName", "stationTitle")
+                    .firstNotNullOfOrNull { k -> s.optStr(k)?.takeIf { it.isNotBlank() } }
+            }
+        }
+        val stationFromTrack = tracks
+            .mapNotNull { it.description }
+            .lastOrNull { desc -> desc.contains("驿站") || desc.contains("代收点") || desc.contains("妈妈驿站") }
+            ?.let { desc ->
+                // 取"到达/已存放至"后面的主体，或【】内内容，兜底整句截短
+                Regex("【(.+?)】").find(desc)?.groupValues?.get(1)
+                    ?: desc.substringAfter("达 ").substringAfter("至 ").takeIf { it != desc }
+                    ?: desc
+            }
         RyllOrderDetail(
             mailNo = base.optStr("mailNo") ?: waybillNo,
             status = base.optStr("status") ?: "",
@@ -212,9 +231,9 @@ internal class RyllClient(private val http: OkHttpClient) {
             // owner 单防御式提取；visitor 单需 mobileCheck 通过后从 recieveOrderDetailResponse 出码（2026-10-22 实测）
             pickupCode = base.optStr("pickCode")
                 ?: base.optStr("pickupCode")
-                ?: ((env["recieveOrderDetailResponse"] as? JsonObject)?.get("value") as? JsonObject)
-                    ?.optStr("stationCode")
-                ?: (env["ocOrderDetailResponse"] as? JsonObject)?.optStr("stationCode"),
+                ?: recieve?.optStr("stationCode")
+                ?: ocDetail?.optStr("stationCode"),
+            stationName = stationFromDetail ?: stationFromTrack,
             tracks = tracks,
         )
     }
@@ -344,6 +363,7 @@ data class RyllOrderDetail(
     val fromCity: String?,
     val toCity: String?,
     val pickupCode: String?,  // owner 单防御式提取，visitor 为 null
+    val stationName: String?, // 驿站名（recieveOrderDetailResponse/ocOrderDetailResponse/轨迹 description 提取）
     val tracks: List<RyllTrack>,
 ) {
     /** 已到驿站待取（STATION） */

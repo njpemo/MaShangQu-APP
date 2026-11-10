@@ -33,13 +33,37 @@ data class ExpressItem(
     val pickupCode: String? = null,   // 列表直接携带的取件码，可空
     val pickupCodeSource: Platform? = null, // 取件码来源渠道（跨平台互补查询命中时记录；列表直出为 null）
     val summary: String? = null,      // 物品/商家描述
+    val imageUrl: String? = null,     // 商品/包裹图 URL（v1.0.10 列表卡片展示，无则降级平台色图标）
     val status: ExpressStatus = ExpressStatus.WAIT_PICKUP,
     val arrivedAt: Long? = null,
     val fetchDeadline: Long? = null,  // 最迟取件时间
     val raw: String? = null,          // 原始 JSON，仅调试用，UI 不读
 )
 
-enum class ExpressStatus { WAIT_PICKUP, PICKED, TIMEOUT, UNKNOWN }
+/**
+ * 包裹状态（v1.0.10 快递页三分区：待取件=WAIT_PICKUP｜运输中=IN_TRANSIT+UNKNOWN｜已签收=PICKED+TIMEOUT）
+ */
+enum class ExpressStatus { WAIT_PICKUP, IN_TRANSIT, PICKED, TIMEOUT, UNKNOWN }
+
+/** 物流轨迹节点（详情弹窗时间线用） */
+data class TrackPoint(
+    val opName: String?,      // 节点名（派件扫描/到达【驿站】…）
+    val opTime: String?,      // 时间文案（"2026-10-22 09:11"），保持平台原始格式
+    val description: String? = null,
+)
+
+/** 快递详情（点击卡片弹窗懒加载）：状态 + 商品信息 + 完整轨迹 + 收寄信息 */
+data class ExpressDetail(
+    val trackingNo: String,
+    val statusDesc: String? = null,
+    val courier: String? = null,      // 快递公司名（识别成功才有，如"中通快递"）
+    val goodsName: String? = null,
+    val goodsImage: String? = null,   // 商品/入库图 URL（有则显示，无则降级平台色图标）
+    val tracks: List<TrackPoint> = emptyList(),
+    val fromTo: String? = null,       // "南通 → 上海"
+    val sender: String? = null,
+    val receiver: String? = null,
+)
 
 /** 取件码详情 */
 data class PickupCode(

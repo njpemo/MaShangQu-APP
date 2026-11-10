@@ -1,9 +1,7 @@
 package com.aggapp.app.ui
 
 import android.content.Intent
-import android.graphics.Bitmap
 import android.net.Uri
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -19,8 +17,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,6 +28,7 @@ import androidx.compose.material.icons.outlined.Fullscreen
 import androidx.compose.material3.AssistChip
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -57,7 +54,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -67,32 +63,21 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.aggapp.app.ui.theme.Brand
 import com.aggapp.core.model.Platform
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.EncodeHintType
-import com.google.zxing.oned.Code128Writer
-import com.google.zxing.common.BitMatrix
 
-/** CODE128 条形码渲染（对齐 sf.md §4.2：H5 原版 JsBarcode，displayValue:false，码号文字单独显示） */
-fun renderCode128(content: String, width: Int = 1000, height: Int = 300): Bitmap? {
-    return try {
-        val hints = mapOf(EncodeHintType.MARGIN to 10)
-        val matrix: BitMatrix = Code128Writer().encode(content, BarcodeFormat.CODE_128, width, height, hints)
-        val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
-        for (x in 0 until width) {
-            for (y in 0 until height) {
-                bmp.setPixel(x, y, if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
-            }
-        }
-        bmp
-    } catch (e: Exception) {
-        e.printStackTrace()
-        null
+/** 从 Compose Context 找到宿主 Activity（全屏亮码改横屏/亮度用） */
+fun android.content.Context.findActivity(): android.app.Activity? {
+    var ctx = this
+    while (ctx is android.content.ContextWrapper) {
+        if (ctx is android.app.Activity) return ctx
+        ctx = ctx.baseContext
     }
+    return null
 }
 
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
@@ -108,7 +93,10 @@ fun IdCodeScreen(vm: MainViewModel) {
 
     // 淘宝账号菜鸟档案未激活（waybill-5026）→ 引导弹窗
     if (state.needCainiaoActivate) {
-        CainiaoActivateDialog(onDismiss = { vm.dismissCainiaoActivate() })
+        CainiaoActivateDialog(
+            onDismiss = { vm.dismissCainiaoActivate() },
+            onNeverShow = { vm.neverShowCainiaoActivate() },
+        )
     }
 
     // 每次打开页面刷新（如意邻里身份码非纯静态，回到本页时重新拉取）
@@ -250,7 +238,6 @@ fun IdCodeScreen(vm: MainViewModel) {
                                     .padding(vertical = 24.dp, horizontal = 16.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally,
                             ) {
-                                // 平台徽标行
                                 val accent = Brand.PlatformColor[state.selected] ?: Brand.Indigo
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Box(
@@ -268,22 +255,12 @@ fun IdCodeScreen(vm: MainViewModel) {
                                 }
                                 Spacer(Modifier.height(16.dp))
 
-                                val bmp = renderCode128(code.content)
-                                if (bmp != null) {
-                                    Image(
-                                        bitmap = bmp.asImageBitmap(),
-                                        contentDescription = "身份码条形码",
-                                        modifier = Modifier.fillMaxWidth(),
-                                    )
-                                } else {
-                                    Box(
-                                        Modifier
-                                            .fillMaxWidth()
-                                            .height(120.dp)
-                                            .background(Color.LightGray, RoundedCornerShape(12.dp)),
-                                        contentAlignment = Alignment.Center,
-                                    ) { Text("条码渲染失败") }
-                                }
+                                // 条码：缓存命中组合期直出，未命中后台渲染（v1.0.10 渲染管线）
+                                BarcodeImage(
+                                    content = code.content,
+                                    modifier = Modifier.fillMaxWidth().aspectRatio(10f / 3f),
+                                    contentDescription = "身份码条形码",
+                                )
                                 Spacer(Modifier.height(16.dp))
                                 // 码号文字单独显示（对齐 H5 原版 displayValue:false）
                                 Text(
@@ -296,20 +273,8 @@ fun IdCodeScreen(vm: MainViewModel) {
                                 )
                                 Spacer(Modifier.height(12.dp))
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    // 倒计时徽章
-                                    state.countdownSec?.let {
-                                        Box(
-                                            Modifier
-                                                .background(Color(0xFFF1F0F8), RoundedCornerShape(50))
-                                                .padding(horizontal = 12.dp, vertical = 5.dp),
-                                        ) {
-                                            Text(
-                                                "服务端对齐刷新 ${it / 60}:${(it % 60).toString().padStart(2, '0')}",
-                                                fontSize = 12.sp,
-                                                color = Color(0xFF46464F),
-                                            )
-                                        }
-                                    }
+                                    // 倒计时徽章：局部 collect，秒跳只重组这一小块
+                                    CountdownBadge(vm)
                                     Box(
                                         Modifier
                                             .background(Color(0xFFF1F0F8), RoundedCornerShape(50))
@@ -404,17 +369,14 @@ fun IdCodeScreen(vm: MainViewModel) {
                             fontWeight = FontWeight.Bold,
                         )
                         if (code != null) {
-                            renderCode128(code.content)?.let {
-                                Image(
-                                    bitmap = it.asImageBitmap(),
-                                    contentDescription = "${p.label}身份码条形码",
-                                    contentScale = ContentScale.Fit,
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 24.dp),
-                                )
-                            }
+                            BarcodeImage(
+                                content = code.content,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 24.dp),
+                                contentDescription = "${p.label}身份码条形码",
+                            )
                             Text(
                                 code.content,
                                 fontSize = 13.sp,
@@ -439,54 +401,107 @@ fun IdCodeScreen(vm: MainViewModel) {
         }
     }
 
-    // ===== 全屏身份码（双击进入；单击任意处退出）=====
+    // ===== 全屏身份码（双击/按钮进入；单击任意处退出；白底黑码、自动最大亮度、条码旋转 90° 横向显示）=====
     if (fullscreen) {
         val code = state.codes[state.selected]
+        // 全屏期间最大亮度（不旋转屏幕方向，条码本身旋转 90° 横向展示；
+        // DisposableEffect 退出时恢复原亮度）
+        val context = LocalContext.current
+        val activity = remember(context) { context.findActivity() }
+        DisposableEffect(Unit) {
+            if (activity != null) {
+                // 亮度：记录原值 → 拉满（BRIGHTNESS_OVERRIDE_FULL = 1f），改的是 window 属性不写系统设置
+                val prevBrightness = activity.window.attributes.screenBrightness
+                val lp = activity.window.attributes
+                lp.screenBrightness = android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_FULL
+                activity.window.attributes = lp
+                onDispose {
+                    val lp2 = activity.window.attributes
+                    lp2.screenBrightness = prevBrightness
+                    activity.window.attributes = lp2
+                }
+            } else {
+                onDispose { }
+            }
+        }
         Dialog(
             onDismissRequest = { fullscreen = false },
             properties = DialogProperties(usePlatformDefaultWidth = false),
         ) {
+            // 白底黑码：亮码场景白底对比度更高，扫码枪/弱光识别率更好
             Box(
                 Modifier
                     .fillMaxSize()
-                    .background(Color.Black)
+                    .background(Color.White)
                     .pointerInput(Unit) { detectTapGestures(onTap = { fullscreen = false }) },
                 contentAlignment = Alignment.Center,
             ) {
                 if (code != null) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            state.selected.label,
-                            fontSize = 18.sp,
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Spacer(Modifier.height(16.dp))
-                        renderCode128(code.content, width = 1400, height = 420)?.let {
-                            Image(
-                                bitmap = it.asImageBitmap(),
-                                contentDescription = "身份码条形码（全屏）",
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(24.dp)
-                                    .aspectRatio(10f / 3f),
-                                contentScale = ContentScale.FillWidth,
-                            )
+                    // 关键：rotate(90f) 只做视觉旋转，布局约束仍是竖屏（宽=短边）。
+                    // 必须 BoxWithConstraints 显式把内容尺寸定为 宽=屏高、高=屏宽 再旋转，
+                    // 条码长度才能吃到屏幕长边，否则被短边限死显得小。
+                    androidx.compose.foundation.layout.BoxWithConstraints(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .size(width = maxHeight, height = maxWidth)
+                                .rotate(90f),
+                        ) {
+                            // 条码宽度铺满屏幕长边（fillMaxWidth），高度按位图比例自适应不变形
+                            // （FillBounds 会把 10:3 硬压成屏宽比导致条纹挤密变形）；
+                            // 渲染位图比例加高到 3000×1100，显示高度更大；码号一行小字贴屏幕底边
+                            Box(Modifier.fillMaxSize()) {
+                                BarcodeImage(
+                                    content = code.content,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .align(Alignment.Center),
+                                    width = 3000,
+                                    height = 1100,
+                                    contentDescription = "身份码条形码（全屏）",
+                                    contentScale = ContentScale.FillWidth,
+                                )
+                                Text(
+                                    code.content,
+                                    fontSize = 13.sp,
+                                    letterSpacing = 1.sp,
+                                    color = Color(0xFF1A1B23),
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .padding(bottom = 2.dp),
+                                )
+                            }
                         }
-                        Spacer(Modifier.height(20.dp))
-                        Text(
-                            code.content,
-                            fontSize = 26.sp,
-                            letterSpacing = 3.sp,
-                            color = Color.White,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        Text("单击屏幕退出全屏", fontSize = 13.sp, color = Color.Gray)
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * 倒计时徽章：独立 collect MainViewModel.countdown，每秒跳动只重组这一个徽章，
+ * 身份码页其余内容（条码/卡片/分段控件）零重组 —— v1.0.10「每秒掉帧一次」的第二根因修复点。
+ */
+@Composable
+private fun CountdownBadge(vm: MainViewModel) {
+    val sec by vm.countdown.collectAsState()
+    sec?.let {
+        Box(
+            Modifier
+                .background(Color(0xFFF1F0F8), RoundedCornerShape(50))
+                .padding(horizontal = 12.dp, vertical = 5.dp),
+        ) {
+            Text(
+                "服务端对齐刷新 ${it / 60}:${(it % 60).toString().padStart(2, '0')}",
+                fontSize = 12.sp,
+                color = Color(0xFF46464F),
+            )
         }
     }
 }
@@ -496,7 +511,7 @@ fun IdCodeScreen(vm: MainViewModel) {
  * 账号在菜鸟侧无用户档案，提供两个菜鸟驿站页面链接，点击拉起淘宝/浏览器完成激活。
  */
 @Composable
-private fun CainiaoActivateDialog(onDismiss: () -> Unit) {
+private fun CainiaoActivateDialog(onDismiss: () -> Unit, onNeverShow: () -> Unit) {
     val context = LocalContext.current
     val links = listOf(
         "菜鸟驿站·身份码" to
@@ -531,6 +546,11 @@ private fun CainiaoActivateDialog(onDismiss: () -> Unit) {
         },
         confirmButton = {
             TextButton(onClick = onDismiss) { Text("我知道了") }
+        },
+        dismissButton = {
+            TextButton(onClick = onNeverShow) {
+                Text("不再展示", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         },
     )
 }

@@ -1,21 +1,26 @@
 package com.aggapp.platform.taobao
 
 import com.aggapp.core.model.CodeType
+import com.aggapp.platform.api.AppLog
 import com.aggapp.core.model.Credential
+import com.aggapp.core.model.ExpressDetail
 import com.aggapp.core.model.ExpressItem
 import com.aggapp.core.model.ExpressStatus
 import com.aggapp.core.model.IdentityCode
 import com.aggapp.core.model.Platform
 import com.aggapp.core.model.PickupCode
 import com.aggapp.core.model.PlatformError
+import com.aggapp.core.model.TrackPoint
 import com.aggapp.platform.api.CapturedRequest
 import com.aggapp.platform.api.LoginMode
 import com.aggapp.platform.api.PlatformAdapter
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 import okhttp3.OkHttpClient
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -120,19 +125,42 @@ class TaobaoAdapter @Inject constructor() : PlatformAdapter {
      * 风控/身份验证 WebView 放行后收尾：用户已在 WebView 内完成登录（页面跳到淘宝首页），
      * 把 WebView Cookie（含 cookie2/unb 等登录态，getCookie 可读 httpOnly）合并进会话存储
      * 并组装 Credential。contextToken 已消费，不能重试 selectAccount。
+     *
+     * 收尾加固：Cookie 合并后先做 mtop 轻量探测（getTimeStamp）验证登录态真实可用，
+     * 防止 WebView 侧误判（如 Cookie 未真正刷新）导致落库一个不能用凭据。
      */
-    fun completeRiskCheck(webviewCookieHeader: String): Credential {
+    suspend fun completeRiskCheck(webviewCookieHeader: String): Credential {
         val session = loginSession
-            ?: throw PlatformError.ParseFailed(Platform.TAOBAO, "登录会话已失效，请重新发送验证码")
+            ?: run {
+                AppLog.e("TB", "riskcheck complete: loginSession already null (context consumed/expired)")
+                throw PlatformError.ParseFailed(Platform.TAOBAO, "登录会话已失效，请重新发送验证码")
+            }
         val cookies = session.mergeWebviewCookies(webviewCookieHeader)
         if (cookies["cookie2"].isNullOrBlank() || cookies["unb"].isNullOrBlank()) {
+            AppLog.e("TB", "riskcheck complete: cookie missing after merge | cookies=${cookies.header()}")
             throw PlatformError.ParseFailed(
                 Platform.TAOBAO,
                 "风控放行后 Cookie 仍缺 cookie2/unb | cookies=${cookies.header()}",
             )
         }
         loginSession = null
-        return buildSmsCredential(cookies, pendingPhone)
+        val cred = buildSmsCredential(cookies, pendingPhone)
+        // 真实可用性探测：unb/cookie2 在但会话可能仍无效，探测失败（NeedRelogin）说明
+        // WebView 未真正完成验证，不能把无效凭据当登录成功落库
+        val alive = try {
+            mtop.request(cred, API_ALIVE_PROBE, "1.0", "{}")
+            true
+        } catch (e: PlatformError.NeedRelogin) {
+            false
+        }
+        AppLog.d("TB", "riskcheck complete: unb=${cookies["unb"]} probe(alive)=$alive")
+        if (!alive) {
+            throw PlatformError.ParseFailed(
+                Platform.TAOBAO,
+                "风控放行后登录态探测失败（cookie2/unb 已落地但会话无效），请在弹窗中重新完成验证",
+            )
+        }
+        return cred
     }
 
     /** 登录成功的手机号（selectAccount 时补 extra.mobile 用） */
@@ -246,20 +274,31 @@ class TaobaoAdapter @Inject constructor() : PlatformAdapter {
         for (stationEl in assemble) {
             val station = stationEl as? JsonObject ?: continue
             val meta = station["stationMessageDTO"] as? JsonObject ?: JsonObject(emptyMap())
-            val stationName = meta.str("stationName") ?: meta.str("name") ?: "菜鸟驿站"
+            // 驿站名以站点级 meta 为准（2026-10-23 实测：pkg 级 stationName 常缺失或不一致，
+            // 显示错误源于误用包裹级字段；站点级 stationMessageDTO.stationName 才是官方名）
+            val stationName = meta.str("stationName") ?: meta.str("name")
+                ?: station.str("stationName") ?: "菜鸟驿站"
             val stationAddress = meta.str("stationAddress") ?: meta.str("address")
             for (pkgEl in collectPackages(station)) {
                 val pkg = pkgEl as? JsonObject ?: continue
                 val trackingNo = pkg.str("waybillNo") ?: continue
-                val picked = pkg.str("pickedWaybill") == "true"
+                // 状态判断依据（按可靠性排序）：
+                // 1. status（"3"=待取在站，其他=已取出库）——但实测滞留件签收后 status 仍为 "3"
+                // 2. signTime 有值 = 已签收/已取出（实测待取件无此字段，滞留件带 signTime 且 status 仍为 "3"）
+                // 3. pickedWaybill 兜底（字段不稳定，实测双向都可能出错）
+                val status = pkg.str("status")
+                val picked = (status != null && status != STATUS_WAIT_PICKUP) ||
+                    pkg.str("signTime") != null ||
+                    pkg.str("pickedWaybill") == "true"
                 out += ExpressItem(
                     id = trackingNo, // 菜鸟列表以运单号为主键（fetchPickupCode 入参）
                     platform = Platform.TAOBAO,
-                    station = pkg.str("stationName") ?: stationName,
+                    station = stationName, // 站点级官方名，不用 pkg 级（实测缺失/不一致）
                     stationAddress = stationAddress,
                     trackingNo = trackingNo,
                     pickupCode = pkg.str("pickupCode"),
                     summary = pkg.str("upCpCode")?.let { "承运：$it" },
+                    imageUrl = pkg.str("inStorePicUrl") ?: pkg.str("picUrl"),
                     status = if (picked) ExpressStatus.PICKED else ExpressStatus.WAIT_PICKUP,
                     arrivedAt = pkg.str("collectionTime")?.parseTime(),
                     fetchDeadline = null,
@@ -352,6 +391,43 @@ class TaobaoAdapter @Inject constructor() : PlatformAdapter {
         return null
     }
 
+    /**
+     * 快递详情（taobao.md §6.4，2026-10-24 实测）：mtop.cainiao.pickup.query.logicdetail。
+     * 入参 stationId/stationType/cpCode 只能取自列表项原始 JSON（raw），缺任一降级返回 null；
+     * 响应 pkgBasicInfo（pkgStatus/signTimeDesc/脱敏收件人）+ pkgLogicDetailList 倒序完整时间线。
+     */
+    override suspend fun fetchDetail(cred: Credential, item: ExpressItem): ExpressDetail? {
+        val no = item.trackingNo?.takeIf { it.isNotBlank() } ?: return null
+        val raw = item.raw?.let { r -> runCatching { Json.parseToJsonElement(r).jsonObject }.getOrNull() }
+            ?: return null
+        val stationId = raw.str("stationId") ?: return null
+        val cpCode = raw.str("upCpCode") ?: return null
+        val stationType = raw.str("stationType") ?: "YZ"
+        val data = """{"stationId":"$stationId","stationType":"$stationType","mailNo":"$no",""" +
+            """"cpCode":"$cpCode","bizVersion":"3.6"}"""
+        val json = mtop.request(cred, API_LOGIC_DETAIL, "1.0", data)
+        val inner = (json["data"] as? JsonObject)?.get("data") as? JsonObject ?: return null
+        val basic = inner["pkgBasicInfo"] as? JsonObject
+        val tracks = (inner["pkgLogicDetailList"] as? JsonArray).orEmpty().mapNotNull { el ->
+            val n = el as? JsonObject ?: return@mapNotNull null
+            TrackPoint(
+                opName = n.str("currentStatus"),
+                opTime = n.str("timeNode"),
+                description = n.str("traceDesc"),
+            )
+        }
+        if (tracks.isEmpty() && basic == null) return null
+        return ExpressDetail(
+            trackingNo = no,
+            statusDesc = basic?.str("pkgStatus") ?: basic?.str("signTimeDesc"),
+            courier = raw.str("upCpCode") ?: raw.str("cpCode"),
+            goodsName = item.summary,
+            goodsImage = raw.str("inStorePicUrl") ?: item.imageUrl,
+            tracks = tracks,
+            receiver = basic?.str("name"),
+        )
+    }
+
     /** multiOneSearch traceId 随机段（Node 实测格式 {ts}-{随机小写串}） */
     private fun randomTrace(): String = UUID.randomUUID().toString().replace("-", "").take(12)
 
@@ -371,6 +447,9 @@ class TaobaoAdapter @Inject constructor() : PlatformAdapter {
 
         /** §6.3 按运单号查/添加（2026-09-29 实测 SUCCESS，关键字段 searchValue） */
         private const val API_MULTI_ONE_SEARCH = "mtop.cainiao.pickup.search.multiOneSearch"
+
+        /** §6.4 包裹详情（pkgBasicInfo + pkgLogicDetailList 完整时间线，2026-10-24 实测） */
+        private const val API_LOGIC_DETAIL = "mtop.cainiao.pickup.query.logicdetail"
 
         /** status 枚举（§6.3 双样本实测）："3"=待取件（在站） */
         private const val STATUS_WAIT_PICKUP = "3"

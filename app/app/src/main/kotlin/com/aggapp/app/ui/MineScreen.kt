@@ -30,6 +30,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ButtonDefaults
 import com.aggapp.app.R
+import com.aggapp.platform.api.AppLog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -192,7 +193,7 @@ fun MineScreen(vm: MineViewModel = hiltViewModel()) {
                 }
             }
             OutlinedButton(
-                onClick = { vm.refreshLoginStates() },
+                onClick = { vm.refreshLoginStates(force = true) },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("重新检查所有登录态") }
 
@@ -647,19 +648,38 @@ fun MineScreen(vm: MineViewModel = hiltViewModel()) {
                                     // 预置会话 Cookie（保持服务端上下文）
                                     state.tbWebviewCookies.forEach { (u, c) -> cm.setCookie(u, c) }
                                     cm.flush()
+                                    // 基线快照：弹窗打开瞬间的 cookie2/unb 值。风控页放行后淘宝必然
+                                    // 刷新登录态 Cookie，轮询只在检测到值「变化/新增」时才判成功，
+                                    // 防止预置的旧/部分 Cookie 直接自证成功（用户未验证就关弹窗）。
+                                    fun unbOf(ck: String): String? = Regex("(?:^|; )unb=([^;]*)").find(ck)?.groupValues?.get(1)
+                                    val baseline = cm.getCookie("https://www.taobao.com/") ?: ""
+                                    val baselineUnb = unbOf(baseline)
+                                    AppLog.d("TB", "riskcheck webview open: riskUrl=${state.tbRiskUrl}")
+                                    AppLog.d("TB", "riskcheck baseline cookie: unb=${baselineUnb ?: "-"} present=${baselineUnb != null}")
                                     val handler = android.os.Handler(android.os.Looper.getMainLooper())
+                                    var checkRuns = 0
                                     val check = object : Runnable {
                                         override fun run() {
+                                            checkRuns++
                                             val ck = cm.getCookie("https://www.taobao.com/") ?: ""
-                                            if (ck.contains("cookie2=") && ck.contains("unb=")) {
+                                            val unb = unbOf(ck)
+                                            val hasCookie2 = Regex("(?:^|; )cookie2=").containsMatchIn(ck)
+                                            // 成功条件：cookie2 存在且 unb 为真实非空值且相对基线发生变化（新增或刷新）
+                                            if (hasCookie2 && !unb.isNullOrBlank() && unb != baselineUnb) {
+                                                AppLog.d("TB", "riskcheck PASSED after ${checkRuns} polls: unb changed ${baselineUnb ?: "-"} -> $unb")
                                                 vm.tbRiskCheckPassed(ck)
                                                 return
+                                            }
+                                            if (checkRuns % 10 == 1) {
+                                                // 每 ~15s 记一次心跳，避免日志被 1.5s 轮询刷屏；复盘时能看到等待时长
+                                                AppLog.d("TB", "riskcheck waiting: poll#$checkRuns hasCookie2=$hasCookie2 unb=${unb ?: "-"} (baseline=${baselineUnb ?: "-"})")
                                             }
                                             handler.postDelayed(this, 1500)
                                         }
                                     }
                                     webViewClient = object : android.webkit.WebViewClient() {
                                         override fun onPageFinished(view: android.webkit.WebView, url: String) {
+                                            AppLog.d("TB", "riskcheck page finished: $url")
                                             handler.postDelayed(check, 1500)
                                         }
                                     }
