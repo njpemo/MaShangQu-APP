@@ -658,16 +658,28 @@ fun MineScreen(vm: MineViewModel = hiltViewModel()) {
                                     AppLog.d("TB", "riskcheck baseline cookie: unb=${baselineUnb ?: "-"} present=${baselineUnb != null}")
                                     val handler = android.os.Handler(android.os.Looper.getMainLooper())
                                     var checkRuns = 0
+                                    // 页面跳离风控域（落到淘宝主站）= 验证完成铁证。同一账号二次验证时
+                                    // unb 与基线相同不会"变化"，只靠轮询 Cookie 永远判不出成功，需此通路。
+                                    var pageLeftRisk = false
+                                    fun pass(why: String) {
+                                        val ck = cm.getCookie("https://www.taobao.com/") ?: ""
+                                        AppLog.d("TB", "riskcheck PASSED ($why) after $checkRuns polls: unb=${unbOf(ck) ?: "-"}")
+                                        vm.tbRiskCheckPassed(ck)
+                                    }
                                     val check = object : Runnable {
                                         override fun run() {
                                             checkRuns++
                                             val ck = cm.getCookie("https://www.taobao.com/") ?: ""
                                             val unb = unbOf(ck)
                                             val hasCookie2 = Regex("(?:^|; )cookie2=").containsMatchIn(ck)
-                                            // 成功条件：cookie2 存在且 unb 为真实非空值且相对基线发生变化（新增或刷新）
+                                            // 成功条件 1：cookie2 存在且 unb 为真实非空值且相对基线发生变化（新增或刷新）
                                             if (hasCookie2 && !unb.isNullOrBlank() && unb != baselineUnb) {
-                                                AppLog.d("TB", "riskcheck PASSED after ${checkRuns} polls: unb changed ${baselineUnb ?: "-"} -> $unb")
-                                                vm.tbRiskCheckPassed(ck)
+                                                pass("unb changed ${baselineUnb ?: "-"} -> $unb")
+                                                return
+                                            }
+                                            // 成功条件 2：页面已跳到淘宝主站（风控域放行）
+                                            if (pageLeftRisk) {
+                                                pass("page left risk domain")
                                                 return
                                             }
                                             if (checkRuns % 10 == 1) {
@@ -680,7 +692,12 @@ fun MineScreen(vm: MineViewModel = hiltViewModel()) {
                                     webViewClient = object : android.webkit.WebViewClient() {
                                         override fun onPageFinished(view: android.webkit.WebView, url: String) {
                                             AppLog.d("TB", "riskcheck page finished: $url")
-                                            handler.postDelayed(check, 1500)
+                                            if (url.contains("login.m.taobao.com") || url.contains("/iv/")) {
+                                                handler.postDelayed(check, 1500)
+                                            } else {
+                                                pageLeftRisk = true
+                                                handler.postDelayed(check, 500)
+                                            }
                                         }
                                     }
                                     loadUrl(state.tbRiskUrl!!)

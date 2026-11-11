@@ -490,7 +490,10 @@ class MineViewModel @Inject constructor(
     /** 风控 WebView 检测到放行（出现 cookie2/unb 登录态 Cookie）→ 合并 Cookie 直接收尾
      *  （登录已在 WebView 内完成，contextToken 已消费，不能重试 selectAccount） */
     fun tbRiskCheckPassed(webviewCookieHeader: String) {
-        if (_state.value.tbRiskUrl == null) return
+        // 同步置空 tbRiskUrl：多个轮询循环可能同时判定 PASSED，先挡掉后续重复调用
+        if (!_state.value.tbRiskUrl.isNullOrEmpty()) {
+            _state.value = _state.value.copy(tbRiskUrl = null)
+        } else return
         viewModelScope.launch {
             _state.value = _state.value.copy(busy = true, message = null)
             try {

@@ -68,7 +68,7 @@
 
 从 [**Releases**](https://github.com/njpemo/mashangqu/releases) 下载最新 APK，或直接获取当前版本：
 
-> [mashangqu-v1.0.8.apk](https://github.com/njpemo/mashangqu/releases/download/v1.0.8/mashangqu-v1.0.8.apk)
+> [mashangqu-v1.0.10.apk](https://github.com/njpemo/mashangqu/releases/download/v1.0.10/mashangqu-v1.0.10.apk)
 
 安装后，后续新版本可通过 App 内更新自动获取。
 
